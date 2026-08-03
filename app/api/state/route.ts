@@ -13,5 +13,6 @@ export async function PUT(request: Request) {
   const body = await request.json();
   if (!Array.isArray(body.transactions)) return Response.json({ error: "invalid transactions" }, { status: 400 });
   if (!Array.isArray(body.stockHoldings)) return Response.json({ error: "invalid stock holdings" }, { status: 400 });
-  return Response.json(await writeState({ transactions: body.transactions.slice(0, 5000), stockHoldings: body.stockHoldings.slice(0, 2000) }));
+  if (!body.portfolio || typeof body.portfolio !== "object") return Response.json({ error: "invalid portfolio" }, { status: 400 });
+  return Response.json(await writeState({ transactions: body.transactions.slice(0, 5000), stockHoldings: body.stockHoldings.slice(0, 2000), portfolio: body.portfolio }));
 }
