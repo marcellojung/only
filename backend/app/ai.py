@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .history import calculate_summary
+from .gowalter import build_gowalter_prompt
 from .models import AIAnalysis, Holding
 
 
@@ -41,7 +42,7 @@ def _context(db: Session) -> tuple[str, list[Holding], dict[str, float]]:
     return "\n".join(lines), holdings, summary
 
 
-def _local_analysis(holdings: list[Holding], summary: dict[str, float]) -> str:
+def _local_analysis(holdings: list[Holding], summary: dict[str, float], lens_summary: str) -> str:
     total = summary["investment_value"]
     top = holdings[:5]
     concentration = sum(item.market_value for item in top) / total if total else 0
@@ -52,6 +53,12 @@ def _local_analysis(holdings: list[Holding], summary: dict[str, float]) -> str:
 - 투자자산은 **{_money(total)}**, 상위 5개 종목 집중도는 **{concentration * 100:.1f}%**입니다.
 - 전체 자산 대비 현금성 자산 비중은 **{cash_ratio * 100:.1f}%**입니다.
 - 손실 폭이 큰 종목: {', '.join(f'{item.name} {item.return_rate * 100:.1f}%' for item in losers) or '없음'}
+
+## Gowalter 관점
+
+- **{lens_summary}** 순서로 현재 포트폴리오를 점검합니다.
+- 급락과 뉴스는 장기 추세 훼손인지 단기 이벤트인지 먼저 구분해야 합니다.
+- 구조적 성장에 대한 확신은 현재 비중과 손실 허용 범위로 다시 검증해야 합니다.
 
 ## 우선 확인할 일
 
@@ -74,9 +81,16 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def portfolio_prompt(db: Session) -> dict[str, Any]:
+    context, holdings, summary = _context(db)
+    return build_gowalter_prompt(context, holdings)
+
+
 def analyze_portfolio(db: Session, user_prompt: str = "") -> dict[str, Any]:
     context, holdings, summary = _context(db)
-    prompt = user_prompt.strip() or "현재 자산 배분, 집중 위험, 큰 손실 종목, 현금 비중을 점검하고 이번 달 확인할 행동을 제안해 줘."
+    prompt_info = build_gowalter_prompt(context, holdings)
+    prompt = user_prompt.strip() or str(prompt_info["prompt"])
+    ai_input = prompt if "현재 SQLite 포트폴리오:" in prompt else f"{prompt}\n\n현재 SQLite 포트폴리오:\n{context}"
     provider = "local"
     model = "rules-v1"
     error = ""
@@ -89,8 +103,8 @@ def analyze_portfolio(db: Session, user_prompt: str = "") -> dict[str, Any]:
                 headers={"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
                 json={
                     "model": settings.openai_model,
-                    "instructions": "당신은 가족의 개인 자산을 점검하는 분석 보조자입니다. 투자 권유가 아닌 검토 초안을 한국어 Markdown으로 작성하고, 수치 근거와 위험을 분리하세요.",
-                    "input": f"{prompt}\n\n현재 SQLite 포트폴리오:\n{context}",
+                    "instructions": "당신은 가족 포트폴리오를 점검하는 투자 분석 보조자입니다. Gowalter 자료는 정답이나 매매 신호가 아니라 거시 해석과 행동 원칙을 위한 렌즈로만 사용합니다. 투자 권유가 아닌 검토 초안을 한국어 Markdown으로 작성하고, 사실·추론·위험·조건형 행동을 분리하세요.",
+                    "input": ai_input,
                     "max_output_tokens": 3000,
                 },
                 timeout=75,
@@ -106,7 +120,7 @@ def analyze_portfolio(db: Session, user_prompt: str = "") -> dict[str, Any]:
             error = f"{type(exc).__name__}: {exc}"
 
     if not result_text:
-        result_text = _local_analysis(holdings, summary)
+        result_text = _local_analysis(holdings, summary, str(prompt_info["lens_summary"]))
 
     record = AIAnalysis(
         prompt=prompt,
@@ -123,6 +137,7 @@ def analyze_portfolio(db: Session, user_prompt: str = "") -> dict[str, Any]:
         "text": result_text,
         "provider": provider,
         "model": model,
+        "prompt": prompt,
         "warning": error,
         "created_at": record.created_at.isoformat(timespec="seconds"),
     }

@@ -70,6 +70,14 @@ SQLite 파일과 `.env.local`은 Git에서 제외됩니다. 인터넷에 공개�
 
 **AI 분석**은 포트폴리오 구성과 손익을 분석해 DB에 저장합니다. `OPENAI_API_KEY`가 없을 때도 로컬 규칙 기반 분석이 동작합니다. 설정 탭에서는 SQLite, 뱅크샐러드, 시세, AI, Telegram, Google Calendar의 연결 상태를 확인할 수 있습니다.
 
+AI 분석에는 기존 `/coding/portfolio`의 핵심이었던 Gowalter 블로그 관점이 적용됩니다. 주식/ETF 화면 아래의 **관점 프롬프트**에서 현재 종목에 맞게 생성된 실제 프롬프트를 확인·수정한 뒤 다시 분석할 수 있습니다. 기본적으로 아래 폴더를 순서대로 찾습니다.
+
+1. `.env.local`의 `GOWALTER_ARCHIVE_DIR`
+2. 앱 데이터 폴더 아래 `gowalter`
+3. 사용자 다운로드 폴더의 `obsidian_note/personal/investing`
+
+아카이브 폴더에는 `instruction.md`, `gowalter_onepage.md`, `gowalter_investing.md`, `gowalter_어록.md`, `gowalter_blog_posts.json`을 둘 수 있습니다. 파일이 없어도 앱에 포함된 핵심 관점으로 프롬프트와 로컬 분석이 동작합니다.
+
 ## 주식/ETF 가져오기
 
 주식/ETF 탭에서 증권사 `.xlsx`, `.xlsm`, `.csv` 파일을 선택합니다. 다음 열 이름을 자동으로 인식합니다.

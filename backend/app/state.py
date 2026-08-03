@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .history import calculate_summary
+from .gowalter import archive_status
 from .market import latest_exchange_rate
 from .models import AIAnalysis, AlertEvent, AssetItem, Holding, ImportBatch, PortfolioSnapshot, Transaction
 from .telegram import probe_telegram, telegram_configured
@@ -53,6 +54,12 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "connected": bool(last_ai and last_ai.provider == "openai"),
             "message": f"{settings.openai_model} 설정됨" if settings.openai_api_key else "키 없이 로컬 분석 사용",
             "last_checked_at": _iso(last_ai.created_at) if last_ai else "",
+        },
+        "gowalter": {
+            "configured": archive_status()["archive_ready"],
+            "connected": archive_status()["archive_ready"],
+            "message": archive_status()["source_label"],
+            "detail": archive_status()["archive_dir"],
         },
         "telegram": {
             **telegram,

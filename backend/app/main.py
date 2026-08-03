@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from .ai import analyze_portfolio
+from .ai import analyze_portfolio, portfolio_prompt
 from .config import settings
 from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
@@ -50,7 +50,7 @@ class HoldingPatch(BaseModel):
 
 
 class AnalysisPayload(BaseModel):
-    prompt: str = Field(default="", max_length=4000)
+    prompt: str = Field(default="", max_length=16000)
 
 
 @app.get("/health")
@@ -127,6 +127,11 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
 @app.post("/api/ai/analyze", dependencies=[Depends(authorize)])
 def ai_analysis(payload: AnalysisPayload, db: Session = Depends(get_db)) -> dict[str, object]:
     return analyze_portfolio(db, payload.prompt)
+
+
+@app.get("/api/ai/prompt", dependencies=[Depends(authorize)])
+def ai_prompt(db: Session = Depends(get_db)) -> dict[str, object]:
+    return portfolio_prompt(db)
 
 
 @app.get("/api/integrations/status", dependencies=[Depends(authorize)])

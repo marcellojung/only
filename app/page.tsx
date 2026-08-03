@@ -87,6 +87,15 @@ type IntegrationStatus = Record<string, {
   last_checked_at?: string;
 }>;
 
+type GowalterPrompt = {
+  prompt: string;
+  archive_ready: boolean;
+  source_label: string;
+  archive_dir: string;
+  lens_summary: string;
+  related_posts: Array<{ title: string; url: string; published_at: string; summary: string }>;
+};
+
 type ServerState = {
   protected: boolean;
   updated_at: string;
@@ -294,17 +303,34 @@ function Family({ hidden, portfolio, members }: { hidden: boolean; portfolio: Po
   );
 }
 
-function HoldingCard({ item, hidden, onSave }: { item: HoldingData; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void> }) {
+function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
   const estimated = item.quantity_source === "estimated_from_import_value";
-  return <article className="holding-card">
-    <button className="holding-main" onClick={()=>setEditing(!editing)}>
+  const profit = item.market_value-item.principal;
+  const returnPercent = item.return_rate*100;
+  const weight = percentage(item.market_value,totalValue);
+  const meterPosition = Math.max(2,Math.min(98,50+returnPercent/2));
+  const trendClass = returnPercent>0?"gain":returnPercent<0?"loss":"flat";
+  return <article className={`holding-card ${trendClass} ${index<3?"top-holding":""}`}>
+    <button className="holding-main" aria-expanded={editing} onClick={()=>setEditing(!editing)}>
+      <span className="holding-rank">{String(index+1).padStart(2,"0")}</span>
       <span className="asset-logo">{item.name.slice(0,1)}</span>
-      <div><b>{item.name}</b><small>{item.broker} · {item.ticker || "티커 확인 전"} · {item.owner}</small></div>
-      <div className="row-value"><strong><Amount hidden={hidden}>{compactMoney(item.market_value)}</Amount></strong><small className={item.return_rate<0?"negative":"positive"}>{item.return_rate>=0?"+":""}{(item.return_rate*100).toFixed(1)}%</small></div>
+      <div className="holding-identity"><b>{item.name}</b><small><em>{item.broker||"금융사 미지정"}</em><em>{item.owner}</em><em>{item.ticker||"티커 확인 전"}</em></small></div>
+      <span className="holding-weight-ring" style={{background:`conic-gradient(var(--holding-accent) ${Math.min(weight,100)}%,#ecebe4 0)`}}><span><b>{weight.toFixed(1)}</b><small>%</small></span></span>
     </button>
+    <div className="holding-infographic">
+      <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={hidden}>{compactMoney(item.market_value)}</Amount></strong></div>
+      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={hidden}>{compactMoney(item.principal)}</Amount></strong></div>
+      <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={hidden}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
+      <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={hidden}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
+      <div className="return-visual" aria-label={`${item.name} 수익률 ${returnPercent.toFixed(1)}퍼센트`}>
+        <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</b><span>수익</span></div>
+        <div className="return-track"><i className="zero-line"/><i className="return-marker" style={{left:`${meterPosition}%`}}/><span className="loss-zone"/><span className="gain-zone"/></div>
+      </div>
+      <div className="holding-detail-line"><span>{item.quantity?`${money(item.quantity)}주 보유`:"수량 확인 전"}</span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
+    </div>
     {editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
       <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
@@ -314,20 +340,76 @@ function HoldingCard({ item, hidden, onSave }: { item: HoldingData; hidden: bool
   </article>;
 }
 
-function Stocks({ hidden, holdings, summary, exchangeRate, analysis, busy, onImport, onRefresh, onAnalyze, onSave }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:()=>void; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void> }) {
+function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: GowalterPrompt; busy: string; onAnalyze:(prompt?:string)=>Promise<void> }) {
+  const [promptDraft,setPromptDraft] = useState(promptData.prompt);
+  return <article className="panel gowalter-prompt-panel">
+    <div className="panel-head"><div><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트</h2></div><span className={`prompt-status ${promptData.archive_ready?"ready":"fallback"}`}>{promptData.archive_ready?"아카이브 연결":"기본 관점"}</span></div>
+    <p className="prompt-intro">블로그의 확신을 그대로 따르지 않고, 거시 흐름과 이벤트·추세 구분을 우리 포트폴리오의 비중과 손실 허용 범위로 다시 해석해요.</p>
+    <div className="lens-flow" aria-label="Gowalter 분석 순서"><span>거시</span><i>→</i><span>이벤트·추세</span><i>→</i><span>구조적 성장</span><i>→</i><span>분할 대응</span></div>
+    <label className="prompt-editor-label" htmlFor="gowalter-prompt">실제 AI에 전달되는 프롬프트</label>
+    <textarea id="gowalter-prompt" className="prompt-editor" value={promptDraft} maxLength={16000} onChange={(event)=>setPromptDraft(event.target.value)} />
+    {promptData.related_posts.length?<div className="related-posts"><span>현재 종목과 연결된 글</span>{promptData.related_posts.slice(0,3).map((post)=><a key={`${post.published_at}-${post.title}`} href={post.url||undefined} target={post.url?"_blank":undefined} rel={post.url?"noreferrer":undefined}><b>{post.title}</b><small>{post.published_at||"날짜 미상"}</small></a>)}</div>:null}
+    <div className="prompt-actions"><small>{promptData.source_label}</small><button className="text-button" disabled={busy==="ai"} onClick={()=>setPromptDraft(promptData.prompt)}>원문 복원</button><button className="primary-button small" disabled={!promptDraft.trim()||Boolean(busy)} onClick={()=>void onAnalyze(promptDraft)}>{busy==="ai"?"분석 중…":"이 프롬프트로 분석"}</button></div>
+  </article>;
+}
+
+function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
   const value = summary?.investment_value || holdings.reduce((sum,item)=>sum+item.market_value,0);
   const pnl = value-principal;
+  const allocationTotal = holdings.reduce((sum,item)=>sum+item.market_value,0);
+  const allocationColors = ["#345f4d","#7895b6","#d38a90","#c5a86d","#8f85b2","#72a090"];
+  const leadingAllocations = holdings.slice(0,6).map((item,index)=>({
+    key:String(item.id),
+    name:item.name,
+    value:item.market_value,
+    color:allocationColors[index],
+  }));
+  const remainingValue = holdings.slice(6).reduce((sum,item)=>sum+item.market_value,0);
+  const allocations = remainingValue>0
+    ? [...leadingAllocations,{key:"other",name:`기타 ${holdings.length-6}종목`,value:remainingValue,color:"#c8cbc4"}]
+    : leadingAllocations;
+  const allocationStops = allocations.map((item,index)=>{
+    const start = allocations.slice(0,index).reduce((sum,entry)=>sum+percentage(entry.value,allocationTotal),0);
+    const end = start+percentage(item.value,allocationTotal);
+    return `${item.color} ${start}% ${end}%`;
+  }).join(",");
+  const topOneWeight = percentage(holdings[0]?.market_value||0,allocationTotal);
+  const topFiveWeight = percentage(holdings.slice(0,5).reduce((sum,item)=>sum+item.market_value,0),allocationTotal);
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="주식 / ETF" title="꾸준히, 멀리 보기" copy="뱅크샐러드 종목을 현재 시세와 목표가 알림까지 연결해요." />
       <div className="upload-row stock-upload"><button className="primary-button" disabled={Boolean(busy)} onClick={()=>inputRef.current?.click()}>{busy==="import"?"파일 반영 중…":"＋ 뱅크샐러드·종목 파일"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{onImport(event.target.files);event.target.value=""}}/><span>같은 내역은 자동 중복 제외</span></div>
       <article className="investment-hero stock-hero"><span>투자 원금 {compactMoney(principal)}</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={pnl<0?"negative":""}>{pnl>=0?"+":""}{compactMoney(pnl)} ({principal?(pnl/principal*100).toFixed(1):0}%)</strong><div className="spark-bars">{[30,42,36,49,55,51,68,73,69,81,88,96].map((v,i)=><i key={i} style={{height:`${v}%`}} />)}</div></article>
-      <div className="market-actions"><div><span className="eyebrow">환율</span><b>{exchangeRate?.rate?`1 USD = ${money(exchangeRate.rate)}원`:"갱신 전"}</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 환율·현재가 갱신"}</button><button className="filter-button" disabled={Boolean(busy)} onClick={onAnalyze}>{busy==="ai"?"분석 중…":"AI 분석"}</button></div>
+      <div className="market-actions"><div><span className="eyebrow">환율</span><b>{exchangeRate?.rate?`1 USD = ${money(exchangeRate.rate)}원`:"갱신 전"}</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 환율·현재가 갱신"}</button><button className="filter-button" disabled={Boolean(busy)} onClick={()=>void onAnalyze()}>{busy==="ai"?"분석 중…":"Gowalter AI 분석"}</button></div>
+      {holdings.length>0&&<article className="panel portfolio-allocation">
+        <div className="panel-head"><div><span className="eyebrow">전체 종목 비중</span><h2>포트폴리오 한눈에 보기</h2></div><span className="allocation-total-chip">합계 100%</span></div>
+        <div className="allocation-overview">
+          <div className="portfolio-donut" role="img" aria-label={`전체 평가액 중 ${allocations.map((item)=>`${item.name} ${percentage(item.value,allocationTotal).toFixed(1)}퍼센트`).join(", ")}`} style={{background:allocationStops?`conic-gradient(${allocationStops})`:"#ecece6"}}>
+            <div><small>전체 평가액</small><strong><Amount hidden={hidden}>{compactMoney(allocationTotal)}</Amount></strong><span>100%</span></div>
+          </div>
+          <div className="concentration-grid">
+            <div><span>1위 종목</span><strong>{topOneWeight.toFixed(1)}%</strong><small>{holdings[0]?.name||"-"}</small></div>
+            <div><span>상위 5개</span><strong>{topFiveWeight.toFixed(1)}%</strong><small>집중도</small></div>
+            <div><span>분산 종목</span><strong>{holdings.length}개</strong><small>현재 보유</small></div>
+          </div>
+        </div>
+        <div className="allocation-stack" aria-hidden="true">{allocations.map((item)=><i key={item.key} style={{width:`${percentage(item.value,allocationTotal)}%`,background:item.color}} />)}</div>
+        <div className="allocation-rows">
+          {allocations.map((item,index)=><div className="allocation-row" key={item.key}>
+            <span className="allocation-color" style={{background:item.color}} />
+            <span className="allocation-rank">{item.key==="other"?"·":String(index+1).padStart(2,"0")}</span>
+            <div><b>{item.name}</b><span className="allocation-mini-track"><i style={{width:`${percentage(item.value,allocationTotal)}%`,background:item.color}} /></span></div>
+            <p><strong>{percentage(item.value,allocationTotal).toFixed(1)}%</strong><small><Amount hidden={hidden}>{compactMoney(item.value)}</Amount></small></p>
+          </div>)}
+        </div>
+        {holdings.length>6&&<p className="allocation-note">가독성을 위해 평가액 상위 6개 종목을 표시하고, 나머지 {holdings.length-6}개 종목은 기타로 합쳤어요.</p>}
+      </article>}
       {analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
+      {promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>}
       <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><span className="chip">평가액순</span></div>
-      <div className="holding-list">{holdings.length?holdings.map((item)=><HoldingCard key={item.id} item={item} hidden={hidden} onSave={onSave}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} onSave={onSave}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
     </section>
   );
 }
@@ -416,6 +498,7 @@ const integrationLabels: Record<string,[string,string,string]> = {
   bank_salad:["X","뱅크샐러드 업로드","가계부·자산 현황"],
   market:["↗","환율·현재가","Yahoo Finance / yfinance"],
   openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
+  gowalter:["G","Gowalter 관점 아카이브","블로그·투자 원칙·어록"],
   telegram:["T","Telegram 목표가 알림","목표가 도달 알림"],
   google_calendar:["G","Google 캘린더","공유 일정 읽기 · 추가"],
 };
@@ -450,6 +533,7 @@ export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [portfolio, setPortfolio] = useState<Portfolio>(initialPortfolio);
   const [serverState, setServerState] = useState<ServerState | null>(null);
+  const [gowalterPrompt, setGowalterPrompt] = useState<GowalterPrompt | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
   const [modal, setModal] = useState(false);
@@ -462,6 +546,7 @@ export default function Home() {
   useEffect(() => {
     void loadState(sessionStorage.getItem("family-key") || "");
     // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
   }, []);
 
   useEffect(() => {
@@ -501,6 +586,7 @@ export default function Home() {
       setProtectedMode(Boolean(data.protected));
       setLocked(false);
       if (key) sessionStorage.setItem("family-key", key);
+      void loadGowalterPrompt(key);
       return true;
     } catch {
       return false;
@@ -511,6 +597,15 @@ export default function Home() {
     const headers: Record<string,string> = { "x-app-key": sessionStorage.getItem("family-key") || "" };
     if (json) headers["content-type"] = "application/json";
     return headers;
+  }
+
+  async function loadGowalterPrompt(key: string) {
+    try {
+      const response = await fetch("/backend/ai/prompt",{headers:{"x-app-key":key},cache:"no-store"});
+      if(response.ok)setGowalterPrompt(await response.json() as GowalterPrompt);
+    } catch {
+      // 기본 AI 분석은 프롬프트 미리보기가 없어도 계속 사용할 수 있습니다.
+    }
   }
 
   async function importFile(input: FileList | File | null, owner = "성근") {
@@ -548,10 +643,10 @@ export default function Home() {
     } catch(error){setToast(error instanceof Error?error.message:"현재가를 갱신하지 못했어요.");} finally{setBusy("");}
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(prompt = "") {
     setBusy("ai");
     try {
-      const response=await fetch("/backend/ai/analyze",{method:"POST",headers:authHeaders(true),body:JSON.stringify({prompt:""})});
+      const response=await fetch("/backend/ai/analyze",{method:"POST",headers:authHeaders(true),body:JSON.stringify({prompt})});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"분석 실패");
       await loadState(sessionStorage.getItem("family-key")||"");
@@ -604,7 +699,7 @@ export default function Home() {
       <div className="content">
         {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
+        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} />}
         {tab === "realestate" && <RealEstate hidden={hidden} portfolio={portfolio} />}
