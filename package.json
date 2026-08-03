@@ -7,9 +7,13 @@
   },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
+    "dev:full": "node scripts/dev.mjs",
+    "start:full": "node scripts/serve.mjs",
+    "setup:backend": "node scripts/setup-backend.mjs",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "lint": "eslint . --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern .next",
+    "test:backend": "node scripts/test-backend.mjs"
   },
   "dependencies": {
     "next": "16.2.6",

@@ -35,6 +35,13 @@ yarn-error.log*
 # private family data
 data/*.json
 data/*.tmp
+data/*.db
+data/*.db-*
+data/*.pid
+data/*.log
+/.venv/
+.pytest_cache/
+__pycache__/
 
 # vercel
 .vercel

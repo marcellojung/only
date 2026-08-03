@@ -1,0 +1,194 @@
+"""API serialization and integration readiness."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from pathlib import Path
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from .config import settings
+from .history import calculate_summary
+from .market import latest_exchange_rate
+from .models import AIAnalysis, AlertEvent, Holding, ImportBatch, PortfolioSnapshot, Transaction
+from .telegram import probe_telegram, telegram_configured
+
+
+def _iso(value: datetime | date | None) -> str:
+    return value.isoformat() if value else ""
+
+
+def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object]]:
+    last_import = db.scalar(select(ImportBatch).order_by(ImportBatch.imported_at.desc()))
+    last_fx = latest_exchange_rate(db)
+    last_ai = db.scalar(select(AIAnalysis).order_by(AIAnalysis.created_at.desc()))
+    last_alert = db.scalar(select(AlertEvent).order_by(AlertEvent.created_at.desc()))
+    telegram = probe_telegram() if probe else {
+        "configured": telegram_configured(),
+        "connected": telegram_configured(),
+        "message": "설정됨" if telegram_configured() else "설정 필요",
+    }
+    return {
+        "database": {
+            "configured": True,
+            "connected": True,
+            "message": "SQLite 누적 저장 중",
+            "detail": str(settings.data_dir / "family-assets.db"),
+        },
+        "bank_salad": {
+            "configured": True,
+            "connected": bool(last_import),
+            "message": "업로드 완료" if last_import else "첫 파일을 올려 주세요",
+            "last_checked_at": _iso(last_import.imported_at) if last_import else "",
+        },
+        "market": {
+            "configured": True,
+            "connected": bool(last_fx),
+            "message": "현재가·환율 갱신 가능" if last_fx else "첫 갱신 필요",
+            "last_checked_at": _iso(last_fx.captured_at) if last_fx else "",
+        },
+        "openai": {
+            "configured": bool(settings.openai_api_key),
+            "connected": bool(last_ai and last_ai.provider == "openai"),
+            "message": f"{settings.openai_model} 설정됨" if settings.openai_api_key else "키 없이 로컬 분석 사용",
+            "last_checked_at": _iso(last_ai.created_at) if last_ai else "",
+        },
+        "telegram": {
+            **telegram,
+            "last_checked_at": _iso(last_alert.created_at) if last_alert else "",
+        },
+        "google_calendar": {
+            "configured": bool(settings.google_calendar_id and settings.google_service_account_email),
+            "connected": bool(settings.google_calendar_id and settings.google_service_account_email),
+            "message": "설정됨" if settings.google_calendar_id and settings.google_service_account_email else "설정 필요",
+        },
+    }
+
+
+def build_state(db: Session) -> dict[str, object]:
+    summary = calculate_summary(db)
+    latest_transaction_date = db.scalar(select(func.max(Transaction.transaction_date)))
+    if latest_transaction_date:
+        month_start = latest_transaction_date.replace(day=1)
+        if month_start.month == 12:
+            next_month = date(month_start.year + 1, 1, 1)
+        else:
+            next_month = date(month_start.year, month_start.month + 1, 1)
+        monthly_spending = db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                Transaction.transaction_type == "지출",
+                Transaction.transaction_date >= month_start,
+                Transaction.transaction_date < next_month,
+            )
+        ) or 0
+        spending_month = month_start.strftime("%Y-%m")
+    else:
+        monthly_spending = 0
+        spending_month = ""
+
+    investment_pnl = summary["investment_value"] - summary["investment_principal"]
+    summary.update(
+        {
+            "investment_profit_loss": investment_pnl,
+            "investment_return_rate": investment_pnl / summary["investment_principal"] if summary["investment_principal"] else 0,
+            "monthly_spending": float(monthly_spending),
+            "spending_month": spending_month,
+        }
+    )
+    holdings = list(
+        db.scalars(
+            select(Holding)
+            .where(Holding.is_active.is_(True))
+            .order_by(Holding.market_value.desc())
+        )
+    )
+    transactions = list(
+        db.scalars(
+            select(Transaction)
+            .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+            .limit(200)
+        )
+    )
+    snapshots = list(
+        db.scalars(select(PortfolioSnapshot).order_by(PortfolioSnapshot.captured_at.desc()).limit(24))
+    )
+    fx = latest_exchange_rate(db)
+    last_ai = db.scalar(select(AIAnalysis).order_by(AIAnalysis.created_at.desc()))
+    members: dict[str, float] = {}
+    for holding in holdings:
+        members[holding.owner] = members.get(holding.owner, 0) + holding.market_value
+
+    return {
+        "protected": bool(settings.access_key),
+        "updated_at": _iso(snapshots[0].captured_at) if snapshots else "",
+        "summary": summary,
+        "members": members,
+        "transactions": [
+            {
+                "id": str(item.id),
+                "date": _iso(item.transaction_date),
+                "time": item.transaction_time,
+                "type": item.transaction_type,
+                "merchant": item.merchant,
+                "category": item.primary_category,
+                "subcategory": item.secondary_category,
+                "amount": item.amount,
+                "signed_amount": item.signed_amount,
+                "currency": item.currency,
+                "payment_method": item.payment_method,
+                "owner": item.owner,
+            }
+            for item in transactions
+        ],
+        "holdings": [
+            {
+                "id": item.id,
+                "owner": item.owner,
+                "asset_type": item.asset_type,
+                "broker": item.broker,
+                "name": item.name,
+                "ticker": item.ticker,
+                "ticker_source": item.ticker_source,
+                "currency": item.currency,
+                "principal": item.principal,
+                "market_value": item.market_value,
+                "return_rate": item.return_rate,
+                "quantity": item.quantity,
+                "quantity_source": item.quantity_source,
+                "current_price": item.current_price,
+                "price_source": item.price_source,
+                "price_updated_at": _iso(item.price_updated_at),
+                "target_price": item.target_price,
+                "target_alert_enabled": item.target_alert_enabled,
+                "target_alert_sent_at": _iso(item.target_alert_sent_at),
+            }
+            for item in holdings
+        ],
+        "history": [
+            {
+                "id": item.id,
+                "source": item.source,
+                "total_assets": item.total_assets,
+                "total_debts": item.total_debts,
+                "net_assets": item.net_assets,
+                "investment_value": item.investment_value,
+                "captured_at": _iso(item.captured_at),
+            }
+            for item in reversed(snapshots)
+        ],
+        "exchange_rate": {
+            "pair": fx.pair if fx else "USD/KRW",
+            "rate": fx.rate if fx else 0,
+            "source": fx.source if fx else "",
+            "updated_at": _iso(fx.captured_at) if fx else "",
+        },
+        "latest_analysis": {
+            "id": last_ai.id,
+            "text": last_ai.result,
+            "provider": last_ai.provider,
+            "model": last_ai.model,
+            "created_at": _iso(last_ai.created_at),
+        } if last_ai else None,
+        "integrations": integrations(db),
+    }

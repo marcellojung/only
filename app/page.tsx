@@ -22,20 +22,6 @@ type Transaction = {
   owner: "성근" | "지은" | "공통";
 };
 
-type StockHolding = {
-  id: string;
-  name: string;
-  symbol: string;
-  quantity: number;
-  avgPrice: number;
-  currentPrice: number;
-  currency: "KRW" | "USD";
-  owner: "성근" | "지은" | "공통";
-  institution?: string;
-  investedAmount?: number;
-  marketValue?: number;
-};
-
 type Portfolio = {
   source: string;
   asOf: string;
@@ -48,6 +34,78 @@ type Portfolio = {
   realEstate: number;
   movable: number;
   other: number;
+};
+
+type ImportStatus = {
+  label: string;
+  importedAt: string;
+  transactionCount: number;
+  holdingCount: number;
+};
+
+type HoldingData = {
+  id: number;
+  owner: string;
+  asset_type: string;
+  broker: string;
+  name: string;
+  ticker: string;
+  ticker_source: string;
+  currency: string;
+  principal: number;
+  market_value: number;
+  return_rate: number;
+  quantity: number | null;
+  quantity_source: string;
+  current_price: number | null;
+  price_source: string;
+  price_updated_at: string;
+  target_price: number;
+  target_alert_enabled: boolean;
+  target_alert_sent_at: string;
+};
+
+type AssetSummary = {
+  total_assets: number;
+  total_debts: number;
+  net_assets: number;
+  investment_value: number;
+  investment_principal: number;
+  investment_profit_loss: number;
+  investment_return_rate: number;
+  real_estate_value: number;
+  cash_value: number;
+  monthly_spending: number;
+  spending_month: string;
+};
+
+type IntegrationStatus = Record<string, {
+  configured: boolean;
+  connected: boolean;
+  message: string;
+  detail?: string;
+  last_checked_at?: string;
+}>;
+
+type ServerState = {
+  protected: boolean;
+  updated_at: string;
+  summary: AssetSummary;
+  members: Record<string, number>;
+  transactions: Array<{
+    id: string;
+    date: string;
+    type: string;
+    merchant: string;
+    category: string;
+    amount: number;
+    owner: "성근" | "지은" | "공통";
+  }>;
+  holdings: HoldingData[];
+  history: Array<{ id: number; source: string; total_assets: number; total_debts: number; net_assets: number; investment_value: number; captured_at: string }>;
+  exchange_rate: { pair: string; rate: number; source: string; updated_at: string };
+  latest_analysis: { id: number; text: string; provider: string; model: string; created_at: string } | null;
+  integrations: IntegrationStatus;
 };
 
 type CalendarEvent = {
@@ -75,13 +133,6 @@ const initialTransactions: Transaction[] = [
   { id: "2", date: "2026-08-02", merchant: "현대오일뱅크", category: "교통", amount: 76000, kind: "expense", owner: "성근" },
   { id: "3", date: "2026-08-01", merchant: "넷플릭스", category: "구독", amount: 17000, kind: "expense", owner: "성근" },
   { id: "4", date: "2026-07-31", merchant: "교보문고", category: "생활", amount: 28900, kind: "expense", owner: "지은" },
-];
-
-const initialStockHoldings: StockHolding[] = [
-  { id: "s1", name: "삼성전자", symbol: "005930", quantity: 1000, avgPrice: 75150, currentPrice: 78000, currency: "KRW", owner: "공통" },
-  { id: "s2", name: "TIGER 미국S&P500", symbol: "360750", quantity: 312, avgPrice: 191000, currentPrice: 206730, currency: "KRW", owner: "지은" },
-  { id: "s3", name: "Apple", symbol: "AAPL", quantity: 138, avgPrice: 224.2, currentPrice: 252.4, currency: "USD", owner: "성근" },
-  { id: "s4", name: "QQQ", symbol: "QQQ", quantity: 50, avgPrice: 497.7, currentPrice: 532.1, currency: "USD", owner: "성근" },
 ];
 
 const initialPortfolio: Portfolio = {
@@ -146,8 +197,9 @@ function ScreenHeading({ eyebrow, title, copy }: { eyebrow: string; title: strin
   );
 }
 
-function Summary({ hidden, setTab, portfolio, transactions, onImport }: { hidden: boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null) => void }) {
+function Summary({ hidden, setTab, portfolio, transactions, onImport, importStatus, importing }: { hidden: boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null, owner?: string) => void; importStatus: ImportStatus | null; importing: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [importOwner,setImportOwner] = useState("성근");
   const expenses = transactions.filter((item) => item.kind === "expense");
   const latestMonth = expenses.map((item) => item.date.slice(0, 7)).sort().at(-1) || portfolio.asOf.slice(0, 7);
   const monthExpense = expenses.filter((item) => item.date.startsWith(latestMonth)).reduce((sum, item) => sum + item.amount, 0);
@@ -165,7 +217,8 @@ function Summary({ hidden, setTab, portfolio, transactions, onImport }: { hidden
   ];
   return (
     <section className="screen fade-in" aria-label="자산 요약">
-      <div className="upload-row bank-upload"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 뱅크샐러드 통합 파일 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xls" onChange={(event)=>onImport(event.target.files)} /><span>가계부와 자산을 한 번에 교체해요</span></div>
+      <div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지은</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>
+      {importStatus && <div className="import-status" role="status"><b>✓ 업데이트 완료</b><span>{importStatus.label} · {new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(importStatus.importedAt))}</span><small>가계부 {money(importStatus.transactionCount)}건 · 투자상품 {money(importStatus.holdingCount)}개</small></div>}
       <div className="hero-card">
         <div className="hero-orb" />
         <span className="eyebrow light">우리 집 순자산</span>
@@ -236,31 +289,40 @@ function Family({ hidden, portfolio }: { hidden: boolean; portfolio: Portfolio }
   );
 }
 
-const USD_KRW = 1384;
-const holdingValue = (holding: StockHolding) => holding.marketValue ?? holding.quantity * holding.currentPrice * (holding.currency === "USD" ? USD_KRW : 1);
-const holdingCost = (holding: StockHolding) => holding.investedAmount ?? holding.quantity * holding.avgPrice * (holding.currency === "USD" ? USD_KRW : 1);
+function HoldingCard({ item, hidden, onSave }: { item: HoldingData; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [ticker, setTicker] = useState(item.ticker);
+  const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
+  const estimated = item.quantity_source === "estimated_from_import_value";
+  return <article className="holding-card">
+    <button className="holding-main" onClick={()=>setEditing(!editing)}>
+      <span className="asset-logo">{item.name.slice(0,1)}</span>
+      <div><b>{item.name}</b><small>{item.broker} · {item.ticker || "티커 확인 전"} · {item.owner}</small></div>
+      <div className="row-value"><strong><Amount hidden={hidden}>{compactMoney(item.market_value)}</Amount></strong><small className={item.return_rate<0?"negative":"positive"}>{item.return_rate>=0?"+":""}{(item.return_rate*100).toFixed(1)}%</small></div>
+    </button>
+    {editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
+      <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
+      <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
+      <button className="primary-button small">저장</button>
+      <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
+    </form>}
+  </article>;
+}
 
-function Stocks({ hidden, holdings, onImport }: { hidden: boolean; holdings: StockHolding[]; onImport: (files: FileList | null) => void }) {
+function Stocks({ hidden, holdings, summary, exchangeRate, analysis, busy, onImport, onRefresh, onAnalyze, onSave }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:()=>void; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const totalValue = holdings.reduce((sum, holding)=>sum + holdingValue(holding), 0);
-  const totalCost = holdings.reduce((sum, holding)=>sum + holdingCost(holding), 0);
-  const gain = totalValue - totalCost;
-  const gainPercent = totalCost ? gain / totalCost * 100 : 0;
+  const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
+  const value = summary?.investment_value || holdings.reduce((sum,item)=>sum+item.market_value,0);
+  const pnl = value-principal;
   return (
     <section className="screen fade-in">
-      <ScreenHeading eyebrow="주식 / ETF" title="꾸준히, 멀리 보기" copy="국내외 계좌를 합쳐 수익과 비중을 확인해요." />
-      <div className="upload-row stock-upload"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 증권사 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={(event)=>onImport(event.target.files)} /><span>xlsx · xls · csv</span><a href="/templates/stock-holdings.csv" download>샘플 양식 ↓</a></div>
-      <article className="investment-hero stock-hero"><span>투자 원금 {compactMoney(totalCost)}</span><h2><Amount hidden={hidden}>{compactMoney(totalValue)}</Amount></h2><strong className={gain >= 0 ? "" : "loss-text"}>{gain >= 0 ? "+" : ""}{compactMoney(gain)} ({gainPercent >= 0 ? "+" : ""}{gainPercent.toFixed(1)}%)</strong><div className="spark-bars">{[30,42,36,49,55,51,68,73,69,81,88,96].map((v,i)=><i key={i} style={{height:`${v}%`}} />)}</div></article>
-      <div className="stock-upload-note"><span>✓</span><p><b>증권사 양식을 자동으로 읽어요</b><small>종목명 · 종목코드 · 수량 · 평균단가 · 현재가 열을 인식합니다.</small></p></div>
-      <div className="section-title-row"><div><span className="eyebrow">보유 종목</span><h2>내 포트폴리오</h2></div><button className="filter-button">수익률순⌄</button></div>
-      <div className="asset-list">
-        {holdings.map((holding, index) => {
-          const cost = holdingCost(holding);
-          const rate = cost ? (holdingValue(holding) / cost - 1) * 100 : 0;
-          const detail = holding.quantity ? `${holding.symbol || "종목코드 없음"} · ${money(holding.quantity)}주` : holding.institution || "평가금액 기준";
-          return <article className="asset-row" key={holding.id}><span className={`asset-logo logo-${index % 4}`}>{holding.name.slice(0,1)}</span><div><b>{holding.name}</b><small>{detail} <em className="owner-chip">{holding.owner}</em></small></div><div className="row-value"><strong><Amount hidden={hidden}>{compactMoney(holdingValue(holding))}</Amount></strong><small className={rate >= 0 ? "positive" : "negative"}>{rate >= 0 ? "+" : ""}{rate.toFixed(1)}%</small></div></article>;
-        })}
-      </div>
+      <ScreenHeading eyebrow="주식 / ETF" title="꾸준히, 멀리 보기" copy="뱅크샐러드 종목을 현재 시세와 목표가 알림까지 연결해요." />
+      <div className="upload-row stock-upload"><button className="primary-button" disabled={Boolean(busy)} onClick={()=>inputRef.current?.click()}>{busy==="import"?"파일 반영 중…":"＋ 뱅크샐러드·종목 파일"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{onImport(event.target.files);event.target.value=""}}/><span>같은 내역은 자동 중복 제외</span></div>
+      <article className="investment-hero stock-hero"><span>투자 원금 {compactMoney(principal)}</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={pnl<0?"negative":""}>{pnl>=0?"+":""}{compactMoney(pnl)} ({principal?(pnl/principal*100).toFixed(1):0}%)</strong><div className="spark-bars">{[30,42,36,49,55,51,68,73,69,81,88,96].map((v,i)=><i key={i} style={{height:`${v}%`}} />)}</div></article>
+      <div className="market-actions"><div><span className="eyebrow">환율</span><b>{exchangeRate?.rate?`1 USD = ${money(exchangeRate.rate)}원`:"갱신 전"}</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 환율·현재가 갱신"}</button><button className="filter-button" disabled={Boolean(busy)} onClick={onAnalyze}>{busy==="ai"?"분석 중…":"AI 분석"}</button></div>
+      {analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
+      <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><span className="chip">평가액순</span></div>
+      <div className="holding-list">{holdings.length?holdings.map((item)=><HoldingCard key={item.id} item={item} hidden={hidden} onSave={onSave}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
     </section>
   );
 }
@@ -288,22 +350,6 @@ function RealEstate({ hidden, portfolio }: { hidden: boolean; portfolio: Portfol
   );
 }
 
-function categorize(name: string) {
-  if (/마트|마켓|식당|카페|배달|쿠팡이츠|요기요/.test(name)) return "식비";
-  if (/주유|택시|버스|지하철|철도|교통/.test(name)) return "교통";
-  if (/넷플릭스|유튜브|멜론|구독/.test(name)) return "구독";
-  if (/병원|약국|치과/.test(name)) return "건강";
-  return "생활";
-}
-
-const numberFrom = (value: unknown) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || 0;
-
-function dateFromSpreadsheet(value: unknown) {
-  if (value instanceof Date) return value.toISOString().slice(0,10);
-  if (typeof value === "number") return new Date(Date.UTC(1899, 11, 30) + value * 86400000).toISOString().slice(0,10);
-  return String(value || "").replace(/[./]/g,"-").slice(0,10);
-}
-
 function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transactions: Transaction[]; onImport: (files: FileList | null) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const latestMonth = transactions.map((item)=>item.date.slice(0,7)).sort().at(-1) || "2026-08";
@@ -326,7 +372,7 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow={`${latestMonth.slice(0,4)}년 ${Number(latestMonth.slice(5))}월`} title="이번 달 생활비" copy="뱅크샐러드 내역에서 이체를 제외하고 지출과 수입을 정리했어요." />
-      <div className="upload-row"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 카드·뱅크샐러드 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={(e)=>onImport(e.target.files)} /><button className="icon-button" aria-label="자동 분류 새로고침">↻</button></div>
+      <div className="upload-row"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 카드·뱅크샐러드 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{ onImport(event.target.files); event.target.value = ""; }} /><button className="icon-button" aria-label="자동 분류 새로고침">↻</button></div>
       <div className="metric-grid ledger-metrics"><article className="metric-card wide"><p>총 지출</p><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong><small>이체 제외 · {expenses.length}건</small></article><article className="metric-card"><p>일 평균</p><strong><Amount hidden={hidden}>{compactMoney(total/elapsedDays)}</Amount></strong><small>{elapsedDays}일 기준</small></article><article className="metric-card"><p>총 수입</p><strong><Amount hidden={hidden}>{compactMoney(income)}</Amount></strong><small>{monthItems.filter((item)=>item.kind==="income").length}건</small></article></div>
       <article className="panel spending-panel"><div className="panel-head"><div><span className="eyebrow">항목별 지출</span><h2>어디에 썼을까요?</h2></div><span className="chip">{Number(latestMonth.slice(5))}월</span></div><div className="spending-chart"><div className="donut expense-donut" style={{background:chartStops ? `conic-gradient(${chartStops})` : undefined}}><div><small>합계</small><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong></div></div><div className="expense-legend">{categoryRows.map(([category,value],index)=><span key={category}><i className="dot" style={{background:chartColors[index]}}/>{category} <b>{percentage(value,total).toFixed(0)}%</b></span>)}</div></div></article>
       <div className="section-title-row"><div><span className="eyebrow">최근 내역</span><h2>결제 내역</h2></div><button className="text-button">전체보기</button></div>
@@ -360,14 +406,23 @@ function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: () 
   );
 }
 
-function Settings({ protectedMode }: { protectedMode: boolean }) {
+const integrationLabels: Record<string,[string,string,string]> = {
+  database:["S","SQLite 누적 저장","자산·가계부·분석·알림 이력"],
+  bank_salad:["X","뱅크샐러드 업로드","가계부·자산 현황"],
+  market:["↗","환율·현재가","Yahoo Finance / yfinance"],
+  openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
+  telegram:["T","Telegram 목표가 알림","목표가 도달 알림"],
+  google_calendar:["G","Google 캘린더","공유 일정 읽기 · 추가"],
+};
+
+function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMode: boolean; integrations: IntegrationStatus; busy: string; onProbe:()=>void }) {
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
-      <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span></div><div><b>성근 · 지은의 집</b><small>마지막 동기화 방금 전</small></div><span className="secure-badge">비공개</span></article>
-      <div className="settings-group"><h2>연동</h2><button><span className="settings-symbol google">G</span><div><b>Google 캘린더</b><small>공유 일정 읽기 · 추가</small></div><em>설정 필요</em><i>›</i></button><button><span className="settings-symbol excel">X</span><div><b>카드 엑셀 가져오기</b><small>xlsx · xls · csv</small></div><i>›</i></button></div>
-      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol server">W</span><div><b>비공개 웹 저장소</b><small>{protectedMode ? "접근 키로 보호됨" : "현재 데모 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"설정 필요"}</em><i>›</i></button><button><span className="settings-symbol privacy">●</span><div><b>데이터 보관</b><small>자산 데이터는 비공개 DB에 암호화 저장</small></div><i>›</i></button></div>
-      <div className="privacy-note"><b>우리 둘만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 접근 키와 HTTPS로 보호하는 비공개 웹앱입니다.</p></div>
+      <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span></div><div><b>성근 · 지은의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
+      <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{status.last_checked_at?` · ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
+      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
+      <div className="privacy-note"><b>우리 둘만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
     </section>
   );
 }
@@ -388,14 +443,16 @@ export default function Home() {
   const [tab, setTab] = useState<TabId>("summary");
   const [hidden, setHidden] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
-  const [stockHoldings, setStockHoldings] = useState<StockHolding[]>(initialStockHoldings);
   const [portfolio, setPortfolio] = useState<Portfolio>(initialPortfolio);
+  const [serverState, setServerState] = useState<ServerState | null>(null);
+  const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
   const [modal, setModal] = useState(false);
   const [toast, setToast] = useState("");
   const [protectedMode, setProtectedMode] = useState(false);
   const [locked, setLocked] = useState(false);
   const [accessKey, setAccessKey] = useState("");
+  const [busy, setBusy] = useState("");
 
   useEffect(() => {
     void loadState(sessionStorage.getItem("family-key") || "");
@@ -412,16 +469,30 @@ export default function Home() {
 
   async function loadState(key: string) {
     try {
-      const response = await fetch("/api/state", { headers: { "x-app-key": key } });
+      const response = await fetch("/backend/state", { headers: { "x-app-key": key }, cache: "no-store" });
       if (response.status === 401) {
         setLocked(true);
         return false;
       }
       if (!response.ok) return false;
-      const data = await response.json();
-      if (Array.isArray(data.transactions) && data.transactions.length) setTransactions(data.transactions.map((item: Transaction)=>({ ...item, kind: item.kind || "expense" })));
-      if (Array.isArray(data.stockHoldings) && data.stockHoldings.length) setStockHoldings(data.stockHoldings);
-      if (data.portfolio && typeof data.portfolio === "object") setPortfolio({ ...initialPortfolio, ...data.portfolio });
+      const data = await response.json() as ServerState;
+      setServerState(data);
+      setTransactions(data.transactions.map((item)=>({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner})));
+      const summary = data.summary;
+      const known = summary.real_estate_value + summary.investment_value + summary.cash_value;
+      setPortfolio({
+        source: "SQLite 누적",
+        asOf: data.updated_at.slice(0,10),
+        owner: "성근",
+        totalAssets: summary.total_assets,
+        totalDebts: summary.total_debts,
+        netWorth: summary.net_assets,
+        cash: summary.cash_value,
+        investments: summary.investment_value,
+        realEstate: summary.real_estate_value,
+        movable: 0,
+        other: Math.max(0,summary.total_assets-known),
+      });
       setProtectedMode(Boolean(data.protected));
       setLocked(false);
       if (key) sessionStorage.setItem("family-key", key);
@@ -431,143 +502,77 @@ export default function Home() {
     }
   }
 
-  async function persist(nextTransactions: Transaction[], nextStockHoldings: StockHolding[], nextPortfolio: Portfolio) {
-    await fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json", "x-app-key": sessionStorage.getItem("family-key") || "" }, body: JSON.stringify({ transactions: nextTransactions, stockHoldings: nextStockHoldings, portfolio: nextPortfolio }) }).catch(()=>undefined);
+  function authHeaders(json = false) {
+    const headers: Record<string,string> = { "x-app-key": sessionStorage.getItem("family-key") || "" };
+    if (json) headers["content-type"] = "application/json";
+    return headers;
   }
 
-  async function importFile(files: FileList | null) {
-    const file = files?.[0];
+  async function importFile(input: FileList | File | null, owner = "성근") {
+    const file = input instanceof File ? input : input?.[0];
     if (!file) return;
+    setBusy("import");
     try {
-      const XLSX = await import("xlsx");
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      const statusName = workbook.SheetNames.find((name)=>name.replace(/\s/g,"").includes("뱅샐현황"));
-      const ledgerName = workbook.SheetNames.find((name)=>name.replace(/\s/g,"").includes("가계부내역"));
-      if (statusName && ledgerName) {
-        const statusRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[statusName], { header: 1, defval: "", raw: true });
-        const ledgerRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[ledgerName], { header: 1, defval: "", raw: true });
-        const ledgerHeader = ledgerRows.findIndex((row)=>row.map(String).includes("날짜") && row.map(String).includes("타입") && row.map(String).includes("금액"));
-        if (ledgerHeader < 0) throw new Error("missing ledger header");
-        const header = ledgerRows[ledgerHeader].map((value)=>String(value).replace(/\s/g,""));
-        const col = (name: string) => header.indexOf(name);
-        const nameHeader = statusRows.findIndex((row)=>row.map((value)=>String(value).trim()).includes("이름"));
-        const customerName = nameHeader >= 0 ? String(statusRows[nameHeader + 1]?.[statusRows[nameHeader].findIndex((value)=>String(value).trim()==="이름")] || "") : "";
-        const owner: Portfolio["owner"] = customerName.includes("성근") ? "성근" : customerName.includes("지은") ? "지은" : "공통";
-        const importedTransactions = ledgerRows.slice(ledgerHeader + 1).map((row,index)=>{
-          const rawType = String(row[col("타입")] || "").trim();
-          if (rawType !== "지출" && rawType !== "수입") return null;
-          const amount = Math.abs(numberFrom(row[col("금액")]));
-          const date = dateFromSpreadsheet(row[col("날짜")]);
-          const merchant = String(row[col("내용")] || "내역 없음").trim();
-          const category = String(row[col("대분류")] || categorize(merchant) || "미분류").trim();
-          if (!date || !amount) return null;
-          return { id: `banksalad-${date}-${index}`, date, merchant, category, amount, kind: rawType === "수입" ? "income" as const : "expense" as const, owner };
-        }).filter((item): item is Transaction=>Boolean(item)).sort((a,b)=>b.date.localeCompare(a.date));
-
-        const financeStart = statusRows.findIndex((row)=>row.some((value)=>String(value).includes("3.재무현황")));
-        const financeEnd = statusRows.findIndex((row,index)=>index > financeStart && row.some((value)=>String(value).includes("4.보험현황")));
-        let assetCategory = "기타";
-        let debtCategory = "기타";
-        const grouped = { cash: 0, investments: 0, realEstate: 0, movable: 0, other: 0 };
-        let totalAssets = 0;
-        let totalDebts = 0;
-        for (const row of statusRows.slice(financeStart + 1, financeEnd)) {
-          if (row[1]) assetCategory = String(row[1]).trim();
-          if (row[5]) debtCategory = String(row[5]).trim();
-          const assetName = String(row[2] || "").trim();
-          const assetAmount = Math.max(0, numberFrom(row[4]));
-          if (assetName && assetAmount && !/총자산|순자산/.test(assetCategory)) {
-            totalAssets += assetAmount;
-            if (/부동산/.test(assetCategory)) grouped.realEstate += assetAmount;
-            else if (/투자/.test(assetCategory)) grouped.investments += assetAmount;
-            else if (/자유입출금|현금|저축|전자금융/.test(assetCategory)) grouped.cash += assetAmount;
-            else if (/동산/.test(assetCategory)) grouped.movable += assetAmount;
-            else grouped.other += assetAmount;
-          }
-          const debtName = String(row[6] || "").trim();
-          const debtAmount = Math.max(0, numberFrom(row[8]));
-          if (debtName && debtAmount && !/총부채/.test(debtCategory)) totalDebts += debtAmount;
-        }
-
-        const investmentHeader = statusRows.findIndex((row)=>row.map((value)=>String(value).trim()).includes("투자상품종류"));
-        const investmentColumns = investmentHeader >= 0 ? statusRows[investmentHeader].map((value)=>String(value).replace(/\s/g,"")) : [];
-        const investmentCol = (name: string)=>investmentColumns.indexOf(name);
-        const importedHoldings: StockHolding[] = [];
-        if (investmentHeader >= 0) {
-          for (let index = investmentHeader + 1; index < statusRows.length; index += 1) {
-            const row = statusRows[index];
-            const type = String(row[investmentCol("투자상품종류")] || "").trim();
-            if (type === "총계" || row.some((value)=>String(value).includes("6.대출현황"))) break;
-            const name = String(row[investmentCol("상품명")] || "").trim();
-            const marketValue = Math.max(0, numberFrom(row[investmentCol("평가금액")]));
-            if (!name || !marketValue || !/주식|펀드/.test(type)) continue;
-            importedHoldings.push({ id: `banksalad-stock-${index}`, name, symbol: type, quantity: 0, avgPrice: 0, currentPrice: 0, currency: "KRW", owner, institution: String(row[investmentCol("금융사")] || ""), investedAmount: Math.max(0, numberFrom(row[investmentCol("투자원금")])), marketValue });
-          }
-        }
-        const latestDate = importedTransactions[0]?.date || new Date().toISOString().slice(0,10);
-        const importedPortfolio: Portfolio = { source: "뱅크샐러드", asOf: latestDate, owner, totalAssets, totalDebts, netWorth: totalAssets-totalDebts, ...grouped };
-        setTransactions(importedTransactions);
-        setStockHoldings(importedHoldings);
-        setPortfolio(importedPortfolio);
-        await persist(importedTransactions, importedHoldings, importedPortfolio);
-        setToast(`가계부 ${importedTransactions.length}건과 투자상품 ${importedHoldings.length}개를 업데이트했어요.`);
-        return;
-      }
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const imported = rows.slice(0, 100).map((row, index) => {
-        const values = Object.values(row);
-        const merchant = String(row["가맹점명"] || row["이용가맹점"] || row["상호"] || values.find((value)=>typeof value === "string" && value.length > 1) || `가져온 내역 ${index+1}`);
-        const rawAmount = row["이용금액"] || row["결제금액"] || row["금액"] || values.find((value)=>typeof value === "number") || 0;
-        const rawDate = row["이용일"] || row["결제일"] || row["날짜"] || "2026-08-03";
-        const date = rawDate instanceof Date ? rawDate.toISOString().slice(0,10) : String(rawDate).replace(/[./]/g,"-").slice(0,10);
-        return { id: `${Date.now()}-${index}`, date, merchant, category: categorize(merchant), amount: Math.abs(Number(String(rawAmount).replace(/[^0-9.-]/g,""))) || 0, kind: "expense" as const, owner: "공통" as const };
-      }).filter((item)=>item.amount > 0) as Transaction[];
-      if (!imported.length) throw new Error("no rows");
-      const next = [...imported, ...transactions];
-      setTransactions(next);
-      await persist(next, stockHoldings, portfolio);
-      setToast(`${file.name}에서 ${imported.length}건을 자동 분류했어요.`);
-    } catch {
-      setToast("파일을 읽지 못했어요. 날짜·가맹점·금액 열을 확인해 주세요.");
+      const form = new FormData();
+      form.append("file",file);
+      const response = await fetch(`/backend/import?owner=${encodeURIComponent(owner)}`,{method:"POST",headers:authHeaders(),body:form});
+      const result = await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(result.detail||"업로드 실패");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setImportStatus({label:file.name,importedAt:new Date().toISOString(),transactionCount:result.transactions_read||0,holdingCount:result.holdings_updated||0});
+      setToast(`가계부 ${result.transactions_added}건 추가 · 투자상품 ${result.holdings_updated}개 갱신`);
+    } catch (error) {
+      setToast(error instanceof Error?error.message:"파일을 처리하지 못했어요.");
+    } finally {
+      setBusy("");
     }
   }
 
   async function importStocks(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
+    await importFile(files);
+  }
+
+  async function refreshMarket() {
+    setBusy("market");
     try {
-      const XLSX = await import("xlsx");
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const imported = rows.slice(0, 500).map((source, index) => {
-        const row = Object.fromEntries(Object.entries(source).map(([key,value])=>[key.replace(/\s/g,""),value]));
-        const name = String(row["종목명"] || row["상품명"] || row["종목"] || row["보유종목"] || "").trim();
-        const symbol = String(row["종목코드"] || row["티커"] || row["코드"] || row["Symbol"] || "").trim();
-        const quantity = Math.abs(numberFrom(row["보유수량"] || row["잔고수량"] || row["수량"] || row["Quantity"]));
-        const avgPrice = Math.abs(numberFrom(row["평균단가"] || row["매입단가"] || row["평균매입가"] || row["매수평균가"] || row["AvgPrice"]));
-        const rawCurrent = Math.abs(numberFrom(row["현재가"] || row["평가단가"] || row["종가"] || row["CurrentPrice"]));
-        const valuation = Math.abs(numberFrom(row["평가금액"] || row["평가액"] || row["현재금액"] || row["MarketValue"]));
-        const currentPrice = rawCurrent || (quantity ? valuation / quantity : 0) || avgPrice;
-        const rawCurrency = String(row["통화"] || row["화폐"] || row["Currency"] || "").toUpperCase();
-        const currency: StockHolding["currency"] = /USD|달러|US\$/.test(rawCurrency) || (symbol && !/^\d+$/.test(symbol)) ? "USD" : "KRW";
-        const rawOwner = String(row["소유자"] || row["명의"] || row["Owner"] || "공통");
-        const owner: StockHolding["owner"] = rawOwner.includes("성근") ? "성근" : rawOwner.includes("지은") ? "지은" : "공통";
-        return { id: `${Date.now()}-stock-${index}`, name: name || symbol, symbol: symbol || "미지정", quantity, avgPrice, currentPrice, currency, owner };
-      }).filter((holding)=>holding.name && holding.quantity > 0 && holding.currentPrice > 0) as StockHolding[];
-      if (!imported.length) throw new Error("no holdings");
-      setStockHoldings(imported);
-      const investmentValue = imported.reduce((sum,holding)=>sum+holdingValue(holding),0);
-      const nextPortfolio = { ...portfolio, investments: investmentValue, totalAssets: Math.max(0, portfolio.totalAssets-portfolio.investments+investmentValue), netWorth: Math.max(0, portfolio.totalAssets-portfolio.investments+investmentValue)-portfolio.totalDebts };
-      setPortfolio(nextPortfolio);
-      await persist(transactions, imported, nextPortfolio);
-      setToast(`${file.name}에서 보유 종목 ${imported.length}개를 불러왔어요.`);
-    } catch {
-      setToast("종목을 읽지 못했어요. 종목명·수량·단가 열을 확인해 주세요.");
-    }
+      const response=await fetch("/backend/market/refresh",{method:"POST",headers:authHeaders()});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(result.detail||"갱신 실패");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setToast(`현재가 ${result.updated}개 갱신 · 티커 ${result.tickers_resolved}개 확인`);
+    } catch(error){setToast(error instanceof Error?error.message:"현재가를 갱신하지 못했어요.");} finally{setBusy("");}
+  }
+
+  async function runAnalysis() {
+    setBusy("ai");
+    try {
+      const response=await fetch("/backend/ai/analyze",{method:"POST",headers:authHeaders(true),body:JSON.stringify({prompt:""})});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(result.detail||"분석 실패");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setToast(`${result.provider==="openai"?"OpenAI":"로컬"} 분석을 누적 저장했어요.`);
+    } catch(error){setToast(error instanceof Error?error.message:"AI 분석을 만들지 못했어요.");} finally{setBusy("");}
+  }
+
+  async function saveHolding(id:number,data:Partial<HoldingData>) {
+    setBusy("holding");
+    try {
+      const response=await fetch(`/backend/holdings/${id}`,{method:"PATCH",headers:authHeaders(true),body:JSON.stringify(data)});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(result.detail||"저장 실패");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setToast("티커와 목표가를 저장했어요.");
+    } catch(error){setToast(error instanceof Error?error.message:"종목 설정을 저장하지 못했어요.");} finally{setBusy("");}
+  }
+
+  async function probeIntegrations() {
+    setBusy("probe");
+    try {
+      const response=await fetch("/backend/integrations/status?probe=true",{headers:authHeaders()});
+      const result=await response.json();
+      if(response.ok)setServerState((current)=>current?{...current,integrations:result}:current);
+      setToast("외부 연동 상태를 실제로 확인했어요.");
+    } catch{setToast("연동 상태를 확인하지 못했어요.");} finally{setBusy("");}
   }
 
   async function addEvent(event: CalendarEvent) {
@@ -592,14 +597,14 @@ export default function Home() {
       <nav className="top-nav" aria-label="전체 메뉴">{navItems.map((item)=><button key={item.id} className={tab===item.id?"active":""} onClick={()=>setTab(item.id)}>{item.label}</button>)}</nav>
 
       <div className="content">
-        {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} />}
+        {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} onImport={importStocks} />}
+        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} />}
         {tab === "realestate" && <RealEstate hidden={hidden} portfolio={portfolio} />}
         {tab === "calendar" && <CalendarScreen events={events} onAdd={()=>setModal(true)} />}
-        {tab === "settings" && <Settings protectedMode={protectedMode} />}
+        {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 
       <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? setModal(true) : setTab("ledger")}><Icon name="plus" /></button>
