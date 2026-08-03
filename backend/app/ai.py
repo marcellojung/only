@@ -89,7 +89,7 @@ def analyze_portfolio(db: Session, user_prompt: str = "") -> dict[str, Any]:
                 headers={"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
                 json={
                     "model": settings.openai_model,
-                    "instructions": "당신은 부부의 개인 자산을 점검하는 분석 보조자입니다. 투자 권유가 아닌 검토 초안을 한국어 Markdown으로 작성하고, 수치 근거와 위험을 분리하세요.",
+                    "instructions": "당신은 가족의 개인 자산을 점검하는 분석 보조자입니다. 투자 권유가 아닌 검토 초안을 한국어 Markdown으로 작성하고, 수치 근거와 위험을 분리하세요.",
                     "input": f"{prompt}\n\n현재 SQLite 포트폴리오:\n{context}",
                     "max_output_tokens": 3000,
                 },

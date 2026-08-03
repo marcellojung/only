@@ -1,6 +1,6 @@
 # Windows PC + Tailscale 무료 운영
 
-이 구성은 공유기 포트를 열지 않고, Tailscale에 로그인한 두 사람의 아이폰에서만 앱을 열 수 있게 합니다. Windows PC가 켜져 있고 사용자 로그인이 유지되는 동안 사용할 수 있습니다.
+이 구성은 공유기 포트를 열지 않고, Tailscale에 로그인한 가족 기기에서만 앱을 열 수 있게 합니다. Windows PC가 켜져 있고 사용자 로그인이 유지되는 동안 사용할 수 있습니다.
 
 ## 1. Windows에 필수 프로그램 설치
 
@@ -12,7 +12,7 @@ winget install Python.Python.3.12
 winget install Tailscale.Tailscale
 ```
 
-설치 후 PowerShell을 다시 열고 Tailscale 앱에 로그인합니다. Tailscale 관리 화면에서 배우자를 사용자로 초대하고 두 아이폰에도 Tailscale 앱을 설치해 같은 비공개 네트워크에 연결합니다.
+설치 후 PowerShell을 다시 열고 Tailscale 앱에 로그인합니다. Tailscale 관리 화면에서 가족 구성원을 초대하고 사용할 아이폰에도 Tailscale 앱을 설치해 같은 비공개 네트워크에 연결합니다.
 
 ## 2. 프로젝트와 현재 데이터 옮기기
 

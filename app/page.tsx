@@ -19,13 +19,13 @@ type Transaction = {
   category: string;
   amount: number;
   kind: "expense" | "income";
-  owner: "성근" | "지은" | "공통";
+  owner: "성근" | "지우" | "윤재" | "공통";
 };
 
 type Portfolio = {
   source: string;
   asOf: string;
-  owner: "성근" | "지은" | "공통";
+  owner: "성근" | "지우" | "윤재" | "공통";
   totalAssets: number;
   totalDebts: number;
   netWorth: number;
@@ -99,7 +99,7 @@ type ServerState = {
     merchant: string;
     category: string;
     amount: number;
-    owner: "성근" | "지은" | "공통";
+    owner: "성근" | "지우" | "윤재" | "공통";
   }>;
   holdings: HoldingData[];
   history: Array<{ id: number; source: string; total_assets: number; total_debts: number; net_assets: number; investment_value: number; captured_at: string }>;
@@ -113,7 +113,7 @@ type CalendarEvent = {
   title: string;
   date: string;
   time?: string;
-  owner: "공통" | "성근" | "지은";
+  owner: "공통" | "성근" | "지우" | "윤재";
   color?: string;
 };
 
@@ -129,10 +129,10 @@ const navItems: { id: TabId; label: string }[] = [
 ];
 
 const initialTransactions: Transaction[] = [
-  { id: "1", date: "2026-08-03", merchant: "마켓컬리", category: "식비", amount: 68400, kind: "expense", owner: "지은" },
+  { id: "1", date: "2026-08-03", merchant: "마켓컬리", category: "식비", amount: 68400, kind: "expense", owner: "지우" },
   { id: "2", date: "2026-08-02", merchant: "현대오일뱅크", category: "교통", amount: 76000, kind: "expense", owner: "성근" },
   { id: "3", date: "2026-08-01", merchant: "넷플릭스", category: "구독", amount: 17000, kind: "expense", owner: "성근" },
-  { id: "4", date: "2026-07-31", merchant: "교보문고", category: "생활", amount: 28900, kind: "expense", owner: "지은" },
+  { id: "4", date: "2026-07-31", merchant: "교보문고", category: "생활", amount: 28900, kind: "expense", owner: "윤재" },
 ];
 
 const initialPortfolio: Portfolio = {
@@ -151,10 +151,11 @@ const initialPortfolio: Portfolio = {
 
 const sampleEvents: CalendarEvent[] = [
   { id: "e1", title: "아파트 관리비", date: "2026-08-05", time: "자동이체", owner: "공통", color: "mint" },
-  { id: "e2", title: "지은 치과", date: "2026-08-08", time: "11:30", owner: "지은", color: "pink" },
+  { id: "e2", title: "지우 치과", date: "2026-08-08", time: "11:30", owner: "지우", color: "pink" },
   { id: "e3", title: "포트폴리오 점검", date: "2026-08-12", time: "20:00", owner: "공통", color: "violet" },
   { id: "e4", title: "부모님 저녁", date: "2026-08-16", time: "18:00", owner: "공통", color: "amber" },
   { id: "e5", title: "성근 건강검진", date: "2026-08-21", time: "09:00", owner: "성근", color: "blue" },
+  { id: "e6", title: "윤재 일정", date: "2026-08-24", time: "16:00", owner: "윤재", color: "amber" },
 ];
 
 const money = (value: number) => new Intl.NumberFormat("ko-KR").format(value);
@@ -217,7 +218,7 @@ function Summary({ hidden, setTab, portfolio, transactions, onImport, importStat
   ];
   return (
     <section className="screen fade-in" aria-label="자산 요약">
-      <div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지은</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>
+      <div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>
       {importStatus && <div className="import-status" role="status"><b>✓ 업데이트 완료</b><span>{importStatus.label} · {new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(importStatus.importedAt))}</span><small>가계부 {money(importStatus.transactionCount)}건 · 투자상품 {money(importStatus.holdingCount)}개</small></div>}
       <div className="hero-card">
         <div className="hero-orb" />
@@ -267,23 +268,27 @@ function Summary({ hidden, setTab, portfolio, transactions, onImport, importStat
   );
 }
 
-function Family({ hidden, portfolio }: { hidden: boolean; portfolio: Portfolio }) {
-  const sungkeun = portfolio.owner === "성근" ? portfolio.totalAssets : 0;
-  const jieun = portfolio.owner === "지은" ? portfolio.totalAssets : 0;
+function Family({ hidden, portfolio, members }: { hidden: boolean; portfolio: Portfolio; members: Record<string,number> }) {
+  const memberRows = [
+    {name:"성근",value:members["성근"]||0,className:"man",color:"#7895b6"},
+    {name:"지우",value:members["지우"]||0,className:"woman",color:"#d38a90"},
+    {name:"윤재",value:members["윤재"]||0,className:"child",color:"#85a98b"},
+    ...(members["공통"] ? [{name:"공통",value:members["공통"],className:"common",color:"#c5ae79"}] : []),
+  ];
+  let cursor = 0;
+  const donutStops = memberRows.map((member)=>{const start=cursor;cursor+=percentage(member.value,portfolio.totalAssets);return `${member.color} ${start}% ${cursor}%`}).join(",");
   return (
     <section className="screen fade-in">
-      <ScreenHeading eyebrow="가족별" title="둘이 모은 자산" copy="각자의 자산과 공동 자산을 한 화면에서 확인해요." />
+      <ScreenHeading eyebrow="가족별" title="함께 모은 우리 가족 자산" copy="성근, 지우, 윤재의 자산과 공동 자산을 한 화면에서 확인해요." />
       <article className="panel family-share">
         <div className="panel-head"><div><span className="eyebrow">전체 자산 비중</span><h2>함께 만드는 포트폴리오</h2></div></div>
-        <div className="donut family-donut" style={{background:`conic-gradient(#7895b6 0 ${percentage(sungkeun, portfolio.totalAssets)}%,#d38a90 ${percentage(sungkeun, portfolio.totalAssets)}% 100%)`}}><div><small>총 자산</small><strong><Amount hidden={hidden}>{compactMoney(portfolio.totalAssets)}</Amount></strong></div></div>
+        <div className="donut family-donut" style={{background:donutStops?`conic-gradient(${donutStops})`:undefined}}><div><small>총 자산</small><strong><Amount hidden={hidden}>{compactMoney(portfolio.totalAssets)}</Amount></strong></div></div>
         <div className="member-list">
-          <div><span className="avatar man">성</span><p><b>성근</b><small><Amount hidden={hidden}>{compactMoney(sungkeun)}</Amount></small></p><strong>{percentage(sungkeun, portfolio.totalAssets).toFixed(1)}%</strong></div>
-          <div><span className="avatar woman">지</span><p><b>지은</b><small><Amount hidden={hidden}>{compactMoney(jieun)}</Amount></small></p><strong>{percentage(jieun, portfolio.totalAssets).toFixed(1)}%</strong></div>
+          {memberRows.map((member)=><div key={member.name}><span className={`avatar ${member.className}`}>{member.name.slice(0,1)}</span><p><b>{member.name}</b><small><Amount hidden={hidden}>{compactMoney(member.value)}</Amount></small></p><strong>{percentage(member.value,portfolio.totalAssets).toFixed(1)}%</strong></div>)}
         </div>
       </article>
       <div className="member-cards">
-        <article className="member-card"><div className="avatar man">성</div><span className="eyebrow">성근 자산</span><h2><Amount hidden={hidden}>{compactMoney(sungkeun)}</Amount></h2><div className="mini-bars"><i style={{width:`${percentage(portfolio.realEstate, portfolio.totalAssets)}%`}} /><i style={{width:`${percentage(portfolio.investments, portfolio.totalAssets)}%`}} /><i style={{width:`${percentage(portfolio.cash, portfolio.totalAssets)}%`}} /></div><small>{portfolio.owner === "성근" ? "이번 뱅크샐러드 파일 기준" : "업로드 자료 없음"}</small></article>
-        <article className="member-card"><div className="avatar woman">지</div><span className="eyebrow">지은 자산</span><h2><Amount hidden={hidden}>{compactMoney(jieun)}</Amount></h2><div className="mini-bars pink-bars"><i style={{width:"0%"}} /><i style={{width:"0%"}} /><i style={{width:"0%"}} /></div><small>{portfolio.owner === "지은" ? "이번 뱅크샐러드 파일 기준" : "지은 님 파일을 추가로 업로드해 주세요"}</small></article>
+        {memberRows.filter((member)=>member.name!=="공통").map((member,index)=><article className="member-card" key={member.name}><div className={`avatar ${member.className}`}>{member.name.slice(0,1)}</div><span className="eyebrow">{member.name} 자산</span><h2><Amount hidden={hidden}>{compactMoney(member.value)}</Amount></h2><div className={index===1?"mini-bars pink-bars":"mini-bars"}><i style={{width:`${percentage(member.value,portfolio.totalAssets)}%`}}/><i style={{width:"0%"}}/><i style={{width:"0%"}}/></div><small>{member.value?"가장 최근 업로드 기준":`${member.name} 자료를 업로드해 주세요`}</small></article>)}
       </div>
     </section>
   );
@@ -419,10 +424,10 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
-      <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span></div><div><b>성근 · 지은의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
+      <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
       <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{status.last_checked_at?` · ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
       <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
-      <div className="privacy-note"><b>우리 둘만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
+      <div className="privacy-note"><b>우리 가족만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
     </section>
   );
 }
@@ -436,7 +441,7 @@ function EventModal({ onClose, onSave }: { onClose: () => void; onSave: (event: 
     onSave({ id: crypto.randomUUID(), title: String(form.get("title")), date: String(form.get("date")), time: String(form.get("time")), owner: String(form.get("owner")) as CalendarEvent["owner"], color: "mint" });
     setSaving(false);
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Google Calendar</span><h2>공동 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 부모님 저녁" required /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue="2026-08-16" required /></label><label>시간<input name="time" type="time" defaultValue="18:00" /></label></div><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지은</option></select></label><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"Google 캘린더에 추가"}</button></form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Google Calendar</span><h2>가족 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 가족 저녁" required /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue="2026-08-16" required /></label><label>시간<input name="time" type="time" defaultValue="18:00" /></label></div><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지우</option><option>윤재</option></select></label><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"Google 캘린더에 추가"}</button></form></div></div>;
 }
 
 export default function Home() {
@@ -584,13 +589,13 @@ export default function Home() {
   }
 
   if (locked) {
-    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 둘만의 공간</h1><p>비공개 웹앱에 설정한 접근 키를 입력해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault(); const ok = await loadState(accessKey); if (!ok) setToast("접근 키가 맞지 않아요.");}}><input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="접근 키" autoComplete="current-password" required/><button className="primary-button full">들어가기</button></form></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
+    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>비공개 웹앱에 설정한 접근 키를 입력해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault(); const ok = await loadState(accessKey); if (!ok) setToast("접근 키가 맞지 않아요.");}}><input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="접근 키" autoComplete="current-password" required/><button className="primary-button full">들어가기</button></form></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
   }
 
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={()=>setTab("summary")} aria-label="온리 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>온리</b><small>우리 둘의 자산</small></span></button>
+        <button className="brand" onClick={()=>setTab("summary")} aria-label="온리 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>온리</b><small>우리 가족의 자산</small></span></button>
         <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name="eye" /></button><button className="avatar-button">우</button></div>
       </header>
 
@@ -598,7 +603,7 @@ export default function Home() {
 
       <div className="content">
         {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
-        {tab === "family" && <Family hidden={hidden} portfolio={portfolio} />}
+        {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
         {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} />}

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .history import calculate_summary
 from .market import latest_exchange_rate
-from .models import AIAnalysis, AlertEvent, Holding, ImportBatch, PortfolioSnapshot, Transaction
+from .models import AIAnalysis, AlertEvent, AssetItem, Holding, ImportBatch, PortfolioSnapshot, Transaction
 from .telegram import probe_telegram, telegram_configured
 
 
@@ -116,6 +116,12 @@ def build_state(db: Session) -> dict[str, object]:
     fx = latest_exchange_rate(db)
     last_ai = db.scalar(select(AIAnalysis).order_by(AIAnalysis.created_at.desc()))
     members: dict[str, float] = {}
+    assets = list(db.scalars(select(AssetItem).where(AssetItem.is_active.is_(True))))
+    for asset in assets:
+        category = asset.category.replace(" ", "")
+        if any(word in category for word in ("투자", "주식", "펀드", "증권")):
+            continue
+        members[asset.owner] = members.get(asset.owner, 0) + asset.value
     for holding in holdings:
         members[holding.owner] = members.get(holding.owner, 0) + holding.market_value
 
