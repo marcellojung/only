@@ -35,7 +35,7 @@ export async function createCalendarEvent(event: NewCalendarEvent) {
   const end = timedEnd ? timedEnd.toISOString() : endDate.toISOString().slice(0,10);
   const body = {
     summary: event.title,
-    description: `온리 앱에서 추가 · ${event.owner || "공통"}`,
+    description: `모아 앱에서 추가 · ${event.owner || "공통"}`,
     start: timed ? { dateTime: start, timeZone: "Asia/Seoul" } : { date: start },
     end: timed ? { dateTime: end, timeZone: "Asia/Seoul" } : { date: end },
   };

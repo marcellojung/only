@@ -96,6 +96,26 @@ type GowalterPrompt = {
   related_posts: Array<{ title: string; url: string; published_at: string; summary: string }>;
 };
 
+type StockReport = {
+  holding_id: number;
+  name: string;
+  ticker: string;
+  generated_at: string;
+  broker_research: Array<{ provider: string; title: string; description: string; url: string; kind: string }>;
+  news: { configured: boolean; provider: string; message: string; items: Array<{ title: string; summary: string; url: string; published_at: string }> };
+  prompts: Array<{ id: string; title: string; description: string; text: string }>;
+  dart: {
+    configured: boolean;
+    available: boolean;
+    message: string;
+    basis: string;
+    metrics: Array<{ key: string; label: string; current: number; previous: number | null; change_rate: number | null }>;
+    ratios: Array<{ label: string; value: number }>;
+    analysis: { summary: string; observations: string[]; cautions: string[] } | null;
+    disclosures: Array<{ title: string; date: string; submitter: string; url: string }>;
+  };
+};
+
 type ServerState = {
   protected: boolean;
   updated_at: string;
@@ -111,6 +131,7 @@ type ServerState = {
     owner: "성근" | "지우" | "윤재" | "공통";
   }>;
   holdings: HoldingData[];
+  debts: DebtData[];
   history: Array<{ id: number; source: string; total_assets: number; total_debts: number; net_assets: number; investment_value: number; captured_at: string }>;
   exchange_rate: { pair: string; rate: number; source: string; updated_at: string };
   latest_analysis: { id: number; text: string; provider: string; model: string; created_at: string } | null;
@@ -124,6 +145,40 @@ type CalendarEvent = {
   time?: string;
   owner: "공통" | "성근" | "지우" | "윤재";
   color?: string;
+};
+
+type HoldingCreatePayload = {
+  owner: string;
+  asset_type: "주식" | "ETF" | "펀드" | "코인";
+  broker: string;
+  name: string;
+  ticker: string;
+  quantity: number;
+  principal: number;
+};
+
+type DebtData = {
+  id:number;
+  owner:string;
+  debt_type:string;
+  provider:string;
+  name:string;
+  principal:number;
+  balance:number;
+  interest_rate:number;
+  opened_on:string;
+  matures_on:string;
+  manual:boolean;
+};
+
+type DebtCreatePayload = {
+  owner:string;
+  debt_type:string;
+  provider:string;
+  name:string;
+  principal:number;
+  balance:number;
+  interest_rate:number;
 };
 
 const navItems: { id: TabId; label: string }[] = [
@@ -178,23 +233,25 @@ const compactMoney = (value: number) => {
 };
 
 const percentage = (value: number, total: number) => total ? value / total * 100 : 0;
+const isCryptoHolding = (item: HoldingData) => ["코인", "암호화폐", "crypto"].includes(item.asset_type.toLowerCase());
+const assetKey = (item: HoldingData) => `holding:${item.id}`;
 
 function Icon({ name }: { name: string }) {
-  const icons: Record<string, string> = {
-    home: "⌂",
-    chart: "↗",
-    wallet: "₩",
-    calendar: "□",
-    settings: "⚙",
-    eye: "◉",
-    plus: "+",
-    lock: "●",
+  const paths:Record<string,ReactNode> = {
+    home:<><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-6h6v6"/></>,
+    chart:<><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><path d="m15 6 3-3 3 3"/></>,
+    wallet:<><path d="M3 6.5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13"/><path d="M16 11h5v5h-5a2.5 2.5 0 0 1 0-5Z"/></>,
+    calendar:<><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></>,
+    settings:<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></>,
+    eye:<><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></>,
+    eyeOff:<><path d="m3 3 18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.1 2.8M6.5 7.3A15.4 15.4 0 0 0 2.5 12s3.5 6 9.5 6a9 9 0 0 0 3.2-.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+    plus:<path d="M12 5v14M5 12h14"/>,
   };
-  return <span aria-hidden="true">{icons[name] ?? "•"}</span>;
+  return <svg className="app-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] ?? <circle cx="12" cy="12" r="2" fill="currentColor"/>}</svg>;
 }
 
 function Amount({ children, hidden }: { children: ReactNode; hidden: boolean }) {
-  return <>{hidden ? <span className="blurred">{children}</span> : children}</>;
+  return <>{hidden ? <span className="private-value" aria-label="숨긴 금액">••••••</span> : children}</>;
 }
 
 function ScreenHeading({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
@@ -207,7 +264,7 @@ function ScreenHeading({ eyebrow, title, copy }: { eyebrow: string; title: strin
   );
 }
 
-function Summary({ hidden, setTab, portfolio, transactions, onImport, importStatus, importing }: { hidden: boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null, owner?: string) => void; importStatus: ImportStatus | null; importing: boolean }) {
+function Summary({ hidden, hiddenRealEstate, setTab, portfolio, transactions, onImport, importStatus, importing }: { hidden: boolean; hiddenRealEstate: boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null, owner?: string) => void; importStatus: ImportStatus | null; importing: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [importOwner,setImportOwner] = useState("성근");
   const expenses = transactions.filter((item) => item.kind === "expense");
@@ -248,7 +305,7 @@ function Summary({ hidden, setTab, portfolio, transactions, onImport, importStat
 
       <div className="metric-grid">
         <article className="metric-card peach"><span className="metric-icon">↗</span><p>투자 자산</p><strong><Amount hidden={hidden}>{compactMoney(portfolio.investments)}</Amount></strong><small>주식 · ETF · 펀드</small></article>
-        <article className="metric-card blue"><span className="metric-icon">⌂</span><p>부동산</p><strong><Amount hidden={hidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>뱅크샐러드 평가금액</small></article>
+        <article className="metric-card blue"><span className="metric-icon">⌂</span><p>부동산</p><strong><Amount hidden={hidden || hiddenRealEstate}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>{hiddenRealEstate ? "개별 자산 숨김 적용 중" : "뱅크샐러드 평가금액"}</small></article>
         <article className="metric-card mint"><span className="metric-icon">₩</span><p>{latestMonth ? `${Number(latestMonth.slice(5))}월 지출` : "이번 달 지출"}</p><strong><Amount hidden={hidden}>{compactMoney(monthExpense)}</Amount></strong><small>이체 제외 · 실제 지출</small></article>
         <article className="metric-card lilac"><span className="metric-icon">◎</span><p>현금성 자산</p><strong><Amount hidden={hidden}>{compactMoney(portfolio.cash)}</Amount></strong><small>입출금 · 저축 · 전자금융</small></article>
       </div>
@@ -303,7 +360,7 @@ function Family({ hidden, portfolio, members }: { hidden: boolean; portfolio: Po
   );
 }
 
-function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void> }) {
+function HoldingCard({ item, index, totalValue, hidden, assetHidden, onToggleHidden, onSave, onOpenReport }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; assetHidden: boolean; onToggleHidden:()=>void; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
@@ -313,7 +370,8 @@ function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: Holdin
   const weight = percentage(item.market_value,totalValue);
   const meterPosition = Math.max(2,Math.min(98,50+returnPercent/2));
   const trendClass = returnPercent>0?"gain":returnPercent<0?"loss":"flat";
-  return <article className={`holding-card ${trendClass} ${index<3?"top-holding":""}`}>
+  const masked = hidden || assetHidden;
+  return <article className={`holding-card ${trendClass} ${index<3?"top-holding":""} ${assetHidden?"asset-is-hidden":""}`}>
     <button className="holding-main" aria-expanded={editing} onClick={()=>setEditing(!editing)}>
       <span className="holding-rank">{String(index+1).padStart(2,"0")}</span>
       <span className="asset-logo">{item.name.slice(0,1)}</span>
@@ -321,15 +379,15 @@ function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: Holdin
       <span className="holding-weight-ring" style={{background:`conic-gradient(var(--holding-accent) ${Math.min(weight,100)}%,#ecebe4 0)`}}><span><b>{weight.toFixed(1)}</b><small>%</small></span></span>
     </button>
     <div className="holding-infographic">
-      <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={hidden}>{compactMoney(item.market_value)}</Amount></strong></div>
-      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={hidden}>{compactMoney(item.principal)}</Amount></strong></div>
-      <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={hidden}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
-      <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={hidden}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
+      <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={masked}>{compactMoney(item.market_value)}</Amount></strong></div>
+      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong></div>
+      <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={masked}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
+      <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={masked}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
       <div className="return-visual" aria-label={`${item.name} 수익률 ${returnPercent.toFixed(1)}퍼센트`}>
-        <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</b><span>수익</span></div>
+        <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}><Amount hidden={masked}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</Amount></b><span>수익</span></div>
         <div className="return-track"><i className="zero-line"/><i className="return-marker" style={{left:`${meterPosition}%`}}/><span className="loss-zone"/><span className="gain-zone"/></div>
       </div>
-      <div className="holding-detail-line"><span>{item.quantity?`${money(item.quantity)}주 보유`:"수량 확인 전"}</span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
+      <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
     </div>
     {editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
@@ -338,6 +396,29 @@ function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: Holdin
       <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
     </form>}
   </article>;
+}
+
+function StockReportModal({ item, report, loading, error, onClose }: { item: HoldingData; report: StockReport | null; loading: boolean; error: string; onClose:()=>void }) {
+  const [copiedPrompt,setCopiedPrompt] = useState("");
+  async function copyPrompt(id:string,text:string) {
+    await navigator.clipboard.writeText(text);
+    setCopiedPrompt(id);
+    window.setTimeout(()=>setCopiedPrompt(""),1800);
+  }
+  return <div className="modal-backdrop report-backdrop" onMouseDown={onClose}><article className="stock-report-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <header className="report-head"><div><span className="eyebrow">종목 상세 · {item.ticker||"티커 미설정"}</span><h2>{item.name}</h2><p>OpenDART 자체 분석, 최신 뉴스와 증권사 리서치를 한곳에서 확인합니다.</p></div><button onClick={onClose} aria-label="닫기">×</button></header>
+    {loading&&<div className="report-loading"><i/><p>공시와 재무제표를 불러오는 중이에요.</p></div>}
+    {error&&<div className="report-notice error">{error}</div>}
+    {!loading&&report&&<div className="report-body">
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">OpenDART · LLM 불필요</span><h3>상세 종목 분석</h3></div>{report.dart.basis&&<span className="chip">{report.dart.basis}</span>}</div><p className={`report-notice ${report.dart.available?"ready":""}`}>{report.dart.message}</p>
+        {report.dart.available&&<><div className="report-metrics">{report.dart.metrics.map((metric)=><article key={metric.key}><span>{metric.label}</span><strong>{compactMoney(metric.current)}</strong><small className={metric.change_rate==null?"":metric.change_rate<0?"negative":"positive"}>{metric.change_rate==null?"전년 비교 없음":`전년 대비 ${metric.change_rate>=0?"+":""}${(metric.change_rate*100).toFixed(1)}%`}</small></article>)}</div><div className="ratio-row">{report.dart.ratios.map((ratio)=><span key={ratio.label}><small>{ratio.label}</small><b>{(ratio.value*100).toFixed(1)}%</b></span>)}</div>{report.dart.analysis&&<div className="report-analysis"><div><h4>확인된 흐름</h4><ul>{report.dart.analysis.observations.map((text)=><li key={text}>{text}</li>)}</ul></div><div><h4>함께 볼 점</h4><ul>{report.dart.analysis.cautions.map((text)=><li key={text}>{text}</li>)}</ul></div></div>}</>}
+      </section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">{report.news.provider}</span><h3>최근 종목 뉴스</h3></div></div><p className={`report-notice ${report.news.items.length?"ready":""}`}>{report.news.message}</p><div className="news-list">{report.news.items.map((news)=><a key={`${news.url}-${news.published_at}`} href={news.url} target="_blank" rel="noreferrer"><div><time>{news.published_at.slice(0,10)||"날짜 미상"}</time><b>{news.title}</b><p>{news.summary}</p></div><span>↗</span></a>)}</div></section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">External research</span><h3>증권사 리포트 검색</h3></div></div><div className="research-links">{report.broker_research.length?report.broker_research.map((link)=><a key={`${link.provider}-${link.kind}`} href={link.url} target="_blank" rel="noreferrer"><span>{link.provider.slice(0,2)}</span><div><b>{link.title}</b><small>{link.description}</small></div><i>↗</i></a>):<p className="report-notice">국내 6자리 종목코드를 설정하면 검색할 수 있습니다.</p>}</div></section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">Copy & analyze</span><h3>종목분석 프롬프트</h3></div></div><div className="prompt-list">{report.prompts.map((prompt)=><details key={prompt.id} className="prompt-card"><summary><div><b>{prompt.title}</b><small>{prompt.description}</small></div><span>펼쳐보기⌄</span></summary><div className="prompt-content"><button onClick={()=>void copyPrompt(prompt.id,prompt.text)}>{copiedPrompt===prompt.id?"✓ 복사됨":"프롬프트 복사"}</button><pre>{prompt.text}</pre></div></details>)}</div></section>
+      {!!report.dart.disclosures.length&&<section className="report-section"><div className="report-title"><div><span className="eyebrow">최근 1년</span><h3>주요 공시</h3></div></div><div className="disclosure-list">{report.dart.disclosures.map((item)=><a key={`${item.date}-${item.url}`} href={item.url} target="_blank" rel="noreferrer"><time>{item.date.replace(/(\d{4})(\d{2})(\d{2})/,"$1.$2.$3")}</time><b>{item.title}</b><span>↗</span></a>)}</div></section>}
+    </div>}
+  </article></div>;
 }
 
 function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: GowalterPrompt; busy: string; onAnalyze:(prompt?:string)=>Promise<void> }) {
@@ -353,7 +434,7 @@ function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: Gowa
   </article>;
 }
 
-function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void> }) {
+function Stocks({ hidden, holdings, hiddenAssetKeys, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport, onToggleAssetHidden, onAdd }: { hidden: boolean; holdings: HoldingData[]; hiddenAssetKeys: string[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void; onToggleAssetHidden:(key:string,label:string)=>void; onAdd:()=>void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
   const value = summary?.investment_value || holdings.reduce((sum,item)=>sum+item.market_value,0);
@@ -408,31 +489,37 @@ function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData,
       </article>}
       {analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
       {promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>}
-      <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><span className="chip">평가액순</span></div>
-      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} onSave={onSave}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
+      <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><button className="primary-button small" onClick={onAdd}>＋ 자산 추가</button></div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">뱅크샐러드 파일을 올리거나 자산을 직접 추가해 주세요.</article>}</div>
     </section>
   );
 }
 
-function Crypto({ hidden }: { hidden: boolean }) {
+function Crypto({ hidden, holdings, hiddenAssetKeys, busy, onRefresh, onAdd, onToggleAssetHidden, onSave, onOpenReport }: { hidden: boolean; holdings: HoldingData[]; hiddenAssetKeys:string[]; busy:string; onRefresh:()=>void; onAdd:()=>void; onToggleAssetHidden:(key:string,label:string)=>void; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
+  const value = holdings.reduce((sum,item)=>sum+item.market_value,0);
+  const principal = holdings.reduce((sum,item)=>sum+item.principal,0);
   return (
     <section className="screen fade-in">
-      <ScreenHeading eyebrow="암호화폐" title="아직 연결된 자산이 없어요" copy="이번 뱅크샐러드 파일에는 암호화폐 평가내역이 포함되지 않았습니다." />
-      <article className="investment-hero crypto-hero"><span>암호화폐 평가금액</span><h2><Amount hidden={hidden}>0원</Amount></h2><strong>별도 거래소 내역을 준비해 주세요</strong><div className="crypto-rings"><i /><i /><i /></div></article>
-      <article className="panel risk-card"><div><span className="eyebrow">데이터 상태</span><h2>미연결</h2><p>지원 양식을 추가하면 이 탭도 실제 값으로 바뀝니다.</p></div><div className="gauge"><i style={{width:"0%"}} /></div></article>
+      <ScreenHeading eyebrow="암호화폐" title="코인도 원화로 한눈에" copy="거래소와 별개로 수량을 등록하면 원화 시세와 평가금액을 갱신해요." />
+      <article className="investment-hero crypto-hero"><span>암호화폐 평가금액</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={value-principal<0?"negative":""}>{value-principal>=0?"+":""}{compactMoney(value-principal)}</strong><div className="crypto-rings"><i /><i /><i /></div></article>
+      <div className="market-actions"><div><span className="eyebrow">KRW 시세</span><b>Yahoo Finance 원화 페어</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 원화 시세 갱신"}</button><button className="filter-button" onClick={onAdd}>＋ 코인 추가</button></div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={value} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">비트코인, 이더리움 등 보유 코인을 직접 추가해 주세요.</article>}</div>
     </section>
   );
 }
 
-function RealEstate({ hidden, portfolio }: { hidden: boolean; portfolio: Portfolio }) {
+function RealEstate({ hidden, assetHidden, onToggleHidden, onAddDebt, portfolio, debts }: { hidden: boolean; assetHidden:boolean; onToggleHidden:()=>void; onAddDebt:()=>void; portfolio: Portfolio; debts:DebtData[] }) {
   const equity = Math.max(0, portfolio.realEstate - portfolio.totalDebts);
   const debtRatio = percentage(portfolio.totalDebts, portfolio.realEstate);
   return (
     <section className="screen fade-in">
-      <ScreenHeading eyebrow="부동산" title="우리 집의 오늘 가치" copy="매입가, 현재 시세와 대출을 함께 관리해요." />
-      <article className="property-card"><div className="property-visual"><span>REAL ESTATE</span><div className="building"><i/><i/><i/><i/><i/><i/></div></div><div className="property-content"><span className="status-pill">뱅크샐러드</span><h2>등록 부동산</h2><p>{portfolio.asOf || "업데이트 전"} 평가 기준</p><div className="property-price"><span>현재 평가금액</span><strong><Amount hidden={hidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>원본 파일의 재무현황 합계</small></div></div></article>
-      <div className="metric-grid property-metrics"><article className="metric-card"><p>총 부채</p><strong><Amount hidden={hidden}>{compactMoney(portfolio.totalDebts)}</Amount></strong><small>자산현황에 연결된 부채</small></article><article className="metric-card"><p>부동산 순가치</p><strong><Amount hidden={hidden}>{compactMoney(equity)}</Amount></strong><small>부채비율 {debtRatio.toFixed(1)}%</small></article></div>
-      <article className="panel loan-panel"><div className="panel-head"><div><span className="eyebrow">부채 비율</span><h2>부동산 대비</h2></div><strong>{debtRatio.toFixed(1)}%</strong></div><div className="progress"><i style={{width:`${Math.min(debtRatio,100)}%`}} /></div><div className="loan-stats"><span>부동산 평가액 <b><Amount hidden={hidden}>{compactMoney(portfolio.realEstate)}</Amount></b></span><span>총 부채 <b><Amount hidden={hidden}>{compactMoney(portfolio.totalDebts)}</Amount></b></span></div></article>
+      <div className="asset-heading-row"><ScreenHeading eyebrow="부동산" title="우리 집의 오늘 가치" copy="매입가, 현재 시세와 대출을 함께 관리해요." /><button className="asset-visibility-button" onClick={onToggleHidden}>{assetHidden?"부동산 표시":"부동산 숨기기"}</button></div>
+      {assetHidden&&<div className="asset-privacy-banner">이 기기에서 부동산 금액을 개별 숨김 처리했습니다.</div>}
+      <article className="property-card"><div className="property-visual"><span>REAL ESTATE</span><div className="building"><i/><i/><i/><i/><i/><i/></div></div><div className="property-content"><span className="status-pill">뱅크샐러드</span><h2>등록 부동산</h2><p>{portfolio.asOf || "업데이트 전"} 평가 기준</p><div className="property-price"><span>현재 평가금액</span><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>원본 파일의 재무현황 합계</small></div></div></article>
+      <div className="metric-grid property-metrics"><article className="metric-card"><p>총 부채</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></strong><small>자산현황에 연결된 부채</small></article><article className="metric-card"><p>부동산 순가치</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(equity)}</Amount></strong><small>부채비율 {debtRatio.toFixed(1)}%</small></article></div>
+      <article className="panel loan-panel"><div className="panel-head"><div><span className="eyebrow">부채 비율</span><h2>부동산 대비</h2></div><strong><Amount hidden={assetHidden}>{debtRatio.toFixed(1)}%</Amount></strong></div><div className="progress"><i style={{width:`${Math.min(debtRatio,100)}%`}} /></div><div className="loan-stats"><span>부동산 평가액 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></b></span><span>총 부채 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></b></span></div></article>
+      <div className="section-title-row"><div><span className="eyebrow">등록 대출 {debts.length}건</span><h2>부동산 부채</h2></div><button className="primary-button small" onClick={onAddDebt}>＋ 부채 추가</button></div>
+      <div className="debt-list">{debts.length?debts.map((debt)=><article className="debt-row" key={debt.id}><span className="debt-symbol">₩</span><div><b>{debt.name}</b><small>{debt.provider||"금융사 미지정"} · {debt.owner} · {debt.debt_type}</small></div><p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(debt.balance)}</Amount></strong><small>{debt.interest_rate?`연 ${debt.interest_rate.toFixed(2)}%`:"금리 미입력"}{debt.manual?" · 직접 등록":" · 뱅크샐러드"}</small></p></article>):<article className="empty-card">뱅크샐러드에 없는 주담대·전세대출을 직접 추가할 수 있어요.</article>}</div>
     </section>
   );
 }
@@ -468,8 +555,8 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   );
 }
 
-function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: () => void }) {
-  const [cursor, setCursor] = useState(new Date(2026, 7, 1));
+function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: (date?:string) => void }) {
+  const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -479,15 +566,16 @@ function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: () 
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="Google Calendar" title="우리의 공동 일정" copy="서로 추가한 일정이 Google 캘린더와 함께 업데이트돼요." />
-      <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date(2026,7,1))}>오늘</button></div>
+      <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
-        const event = monthEvents.find((item)=>item.date===dateKey);
-        const isToday = year===2026 && month===7 && day===3;
-        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <><span>{day}</span>{event && <i className={`event-dot ${event.color || "mint"}`} title={event.title}/>}</>}</div>
+        const dayEvents = monthEvents.filter((item)=>item.date===dateKey);
+        const today = new Date();
+        const isToday = year===today.getFullYear() && month===today.getMonth() && day===today.getDate();
+        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
       })}</div></article>
-      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={onAdd}>＋ 일정 추가</button></div>
-      <div className="event-list">{monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>8월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}</small></div><span>›</span></article>)}</div>
+      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button></div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}</small></div><span>›</span></article>):<div className="calendar-empty">날짜를 눌러 가족 일정을 추가해 보세요.</div>}</div>
       <a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>
     </section>
   );
@@ -499,6 +587,8 @@ const integrationLabels: Record<string,[string,string,string]> = {
   market:["↗","환율·현재가","Yahoo Finance / yfinance"],
   openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
   gowalter:["G","Gowalter 관점 아카이브","블로그·투자 원칙·어록"],
+  opendart:["D","OpenDART 기업 리포트","공시·재무제표 기반 정형 분석"],
+  naver_news:["N","네이버 최신 뉴스","NAVER API HUB 뉴스 검색"],
   telegram:["T","Telegram 목표가 알림","목표가 도달 알림"],
   google_calendar:["G","Google 캘린더","공유 일정 읽기 · 추가"],
 };
@@ -515,16 +605,76 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
   );
 }
 
-function EventModal({ onClose, onSave }: { onClose: () => void; onSave: (event: CalendarEvent) => void }) {
+function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCreatePayload["asset_type"]; onClose:()=>void; onSave:(payload:HoldingCreatePayload)=>Promise<void> }) {
+  const [assetType,setAssetType] = useState<HoldingCreatePayload["asset_type"]>(initialType);
+  const [saving,setSaving] = useState(false);
+  const cryptoPresets = [{name:"비트코인",ticker:"BTC"},{name:"이더리움",ticker:"ETH"},{name:"리플",ticker:"XRP"},{name:"솔라나",ticker:"SOL"}];
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      await onSave({
+        owner:String(form.get("owner")), asset_type:assetType, broker:String(form.get("broker")),
+        name:String(form.get("name")), ticker:String(form.get("ticker")),
+        quantity:Number(form.get("quantity")), principal:Number(form.get("principal")) || 0,
+      });
+    } finally { setSaving(false); }
+  }
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal asset-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <div className="modal-head"><div><span className="eyebrow">직접 등록</span><h2>자산 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
+    <form onSubmit={submit}>
+      <div className="form-row"><label>자산 유형<select value={assetType} onChange={(event)=>setAssetType(event.target.value as HoldingCreatePayload["asset_type"])}><option>주식</option><option>ETF</option><option>펀드</option><option>코인</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
+      {assetType==="코인"&&<div className="asset-presets">{cryptoPresets.map((coin)=><button key={coin.ticker} type="button" onClick={(event)=>{const form=event.currentTarget.closest("form");const name=form?.elements.namedItem("name") as HTMLInputElement|null;const ticker=form?.elements.namedItem("ticker") as HTMLInputElement|null;if(name)name.value=coin.name;if(ticker)ticker.value=coin.ticker;}}>{coin.ticker}</button>)}</div>}
+      <label>자산 이름<input name="name" placeholder={assetType==="코인"?"예: 비트코인":"예: 삼성전자"} required autoFocus /></label>
+      <div className="form-row"><label>티커·심볼<input name="ticker" placeholder={assetType==="코인"?"BTC":"005930.KS / AAPL"} required={assetType!=="펀드"} /></label><label>금융사·거래소<input name="broker" defaultValue={assetType==="코인"?"직접 입력":"직접 입력"} /></label></div>
+      <div className="form-row"><label>보유 수량<input name="quantity" type="number" min="0" step="any" placeholder="0.1" required /></label><label>투자 원금(원)<input name="principal" type="number" min="0" step="1" placeholder="선택 입력" /></label></div>
+      {assetType==="코인"&&<p className="form-hint">심볼은 자동으로 BTC-KRW 같은 원화 시세 페어로 저장됩니다.</p>}
+      <button className="primary-button full" disabled={saving}>{saving?"등록 중…":"자산 등록"}</button>
+    </form>
+  </div></div>;
+}
+
+function DebtModal({ onClose, onSave }: { onClose:()=>void; onSave:(payload:DebtCreatePayload)=>Promise<void> }) {
+  const [saving,setSaving] = useState(false);
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      await onSave({
+        owner:String(form.get("owner")), debt_type:String(form.get("debt_type")),
+        provider:String(form.get("provider")), name:String(form.get("name")),
+        principal:Number(form.get("principal")) || 0, balance:Number(form.get("balance")),
+        interest_rate:Number(form.get("interest_rate")) || 0,
+      });
+    } finally { setSaving(false); }
+  }
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal debt-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <div className="modal-head"><div><span className="eyebrow">직접 등록</span><h2>부동산 부채 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
+    <form onSubmit={submit}>
+      <div className="form-row"><label>대출 종류<select name="debt_type" defaultValue="주택담보대출"><option>주택담보대출</option><option>전세자금대출</option><option>중도금대출</option><option>기타 부동산 대출</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
+      <label>대출 이름<input name="name" placeholder="예: 아파트 주택담보대출" required autoFocus /></label>
+      <label>금융사<input name="provider" placeholder="예: 국민은행" /></label>
+      <div className="form-row"><label>현재 잔액(원)<input name="balance" type="number" min="1" step="1" placeholder="320000000" required /></label><label>최초 대출금(원)<input name="principal" type="number" min="0" step="1" placeholder="선택 입력" /></label></div>
+      <label>금리(연 %)<input name="interest_rate" type="number" min="0" max="100" step="0.01" placeholder="3.80" /></label>
+      <p className="form-hint">직접 등록한 부채는 뱅크샐러드 파일을 다시 올려도 유지됩니다.</p>
+      <button className="primary-button full" disabled={saving}>{saving?"등록 중…":"부채 등록"}</button>
+    </form>
+  </div></div>;
+}
+
+function EventModal({ initialDate, onClose, onSave }: { initialDate:string; onClose: () => void; onSave: (event: CalendarEvent) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setSaving(true);
-    onSave({ id: crypto.randomUUID(), title: String(form.get("title")), date: String(form.get("date")), time: String(form.get("time")), owner: String(form.get("owner")) as CalendarEvent["owner"], color: "mint" });
-    setSaving(false);
+    try {
+      await onSave({ id: crypto.randomUUID(), title: String(form.get("title")), date: String(form.get("date")), time: String(form.get("time")), owner: String(form.get("owner")) as CalendarEvent["owner"], color: String(form.get("color")) });
+    } finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Google Calendar</span><h2>가족 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 가족 저녁" required /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue="2026-08-16" required /></label><label>시간<input name="time" type="time" defaultValue="18:00" /></label></div><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지우</option><option>윤재</option></select></label><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"Google 캘린더에 추가"}</button></form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Family Calendar</span><h2>가족 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 가족 저녁" required autoFocus /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue={initialDate} required /></label><label>시간<input name="time" type="time" /></label></div><div className="form-row"><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지우</option><option>윤재</option></select></label><label>표시 색상<select name="color" defaultValue="mint"><option value="mint">초록</option><option value="blue">파랑</option><option value="pink">분홍</option><option value="amber">주황</option><option value="violet">보라</option></select></label></div><p className="form-hint">Google Calendar가 연결되어 있으면 저장과 동시에 공유 캘린더에도 추가됩니다.</p><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"일정 저장"}</button></form></div></div>;
 }
 
 export default function Home() {
@@ -537,14 +687,36 @@ export default function Home() {
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
   const [modal, setModal] = useState(false);
+  const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
+  const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
+  const [debtModal,setDebtModal] = useState(false);
+  const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [protectedMode, setProtectedMode] = useState(false);
   const [locked, setLocked] = useState(false);
   const [accessKey, setAccessKey] = useState("");
   const [busy, setBusy] = useState("");
+  const [reportItem,setReportItem] = useState<HoldingData|null>(null);
+  const [stockReport,setStockReport] = useState<StockReport|null>(null);
+  const [reportLoading,setReportLoading] = useState(false);
+  const [reportError,setReportError] = useState("");
 
   useEffect(() => {
     void loadState(sessionStorage.getItem("family-key") || "");
+    const savedHidden = localStorage.getItem("moa-hidden-assets");
+    if (savedHidden) {
+      try {
+        const parsed = JSON.parse(savedHidden) as string[];
+        window.setTimeout(()=>setHiddenAssetKeys(parsed),0);
+      } catch { localStorage.removeItem("moa-hidden-assets"); }
+    }
+    const savedEvents = localStorage.getItem("moa-calendar-events");
+    if (savedEvents) {
+      try {
+        const parsed = JSON.parse(savedEvents) as CalendarEvent[];
+        window.setTimeout(()=>setEvents(parsed),0);
+      } catch { localStorage.removeItem("moa-calendar-events"); }
+    }
     // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
   }, []);
@@ -665,6 +837,62 @@ export default function Home() {
     } catch(error){setToast(error instanceof Error?error.message:"종목 설정을 저장하지 못했어요.");} finally{setBusy("");}
   }
 
+  function toggleAssetHidden(key:string,label:string) {
+    setHiddenAssetKeys((current)=>{
+      const next = current.includes(key) ? current.filter((item)=>item!==key) : [...current,key];
+      localStorage.setItem("moa-hidden-assets",JSON.stringify(next));
+      setToast(`${label} ${next.includes(key)?"숨김":"표시"} 처리했어요.`);
+      return next;
+    });
+  }
+
+  async function createAsset(payload:HoldingCreatePayload) {
+    setBusy("asset");
+    try {
+      const response = await fetch("/backend/holdings",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
+      const result = await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"자산을 등록하지 못했습니다.");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setAssetModalType(null);
+      setToast(result.quote_updated?"자산을 등록하고 원화 시세를 반영했어요.":"자산을 등록했어요. 시세 갱신을 다시 눌러 주세요.");
+    } catch(error) {
+      setToast(error instanceof Error?error.message:"자산을 등록하지 못했습니다.");
+      throw error;
+    } finally { setBusy(""); }
+  }
+
+  async function createDebt(payload:DebtCreatePayload) {
+    setBusy("debt");
+    try {
+      const response = await fetch("/backend/debts",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
+      const result = await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"부채를 등록하지 못했습니다.");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setDebtModal(false);
+      setToast("부채를 등록하고 순자산에 반영했어요.");
+    } catch(error) {
+      setToast(error instanceof Error?error.message:"부채를 등록하지 못했습니다.");
+      throw error;
+    } finally { setBusy(""); }
+  }
+
+  async function openStockReport(item:HoldingData) {
+    setReportItem(item);
+    setStockReport(null);
+    setReportError("");
+    setReportLoading(true);
+    try {
+      const response=await fetch(`/backend/holdings/${item.id}/report`,{headers:authHeaders(),cache:"no-store"});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"종목 리포트를 불러오지 못했습니다.");
+      setStockReport(result as StockReport);
+    } catch(error) {
+      setReportError(error instanceof Error?error.message:"종목 리포트를 불러오지 못했습니다.");
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   async function probeIntegrations() {
     setBusy("probe");
     try {
@@ -676,44 +904,61 @@ export default function Home() {
   }
 
   async function addEvent(event: CalendarEvent) {
-    setEvents((current)=>[...current,event].sort((a,b)=>a.date.localeCompare(b.date)));
+    setEvents((current)=>{
+      const next = [...current,event].sort((a,b)=>a.date.localeCompare(b.date));
+      localStorage.setItem("moa-calendar-events",JSON.stringify(next));
+      return next;
+    });
     setModal(false);
     const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
     const result = response?.ok ? await response.json().catch(()=>null) : null;
     setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 저장했어요. Google 연동 후 자동 동기화됩니다.");
   }
 
+  function openEventModal(date = new Date().toISOString().slice(0,10)) {
+    setEventDate(date);
+    setModal(true);
+  }
+
   if (locked) {
     return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>비공개 웹앱에 설정한 접근 키를 입력해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault(); const ok = await loadState(accessKey); if (!ok) setToast("접근 키가 맞지 않아요.");}}><input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="접근 키" autoComplete="current-password" required/><button className="primary-button full">들어가기</button></form></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
   }
 
+  const allHoldings = serverState?.holdings||[];
+  const cryptoHoldings = allHoldings.filter(isCryptoHolding);
+  const stockHoldings = allHoldings.filter((item)=>!isCryptoHolding(item));
+  const hiddenRealEstate = hiddenAssetKeys.includes("category:realestate");
+
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={()=>setTab("summary")} aria-label="온리 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>온리</b><small>우리 가족의 자산</small></span></button>
-        <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name="eye" /></button><button className="avatar-button">우</button></div>
+        <button className="brand" onClick={()=>setTab("summary")} aria-label="모아 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>모아</b><small>우리 가족의 자산</small></span></button>
+        <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name={hidden?"eyeOff":"eye"} /></button><button className="avatar-button">우</button></div>
       </header>
 
       <nav className="top-nav" aria-label="전체 메뉴">{navItems.map((item)=><button key={item.id} className={tab===item.id?"active":""} onClick={()=>setTab(item.id)}>{item.label}</button>)}</nav>
 
       <div className="content">
-        {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
+        {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
+        {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>setAssetModalType("주식")} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
-        {tab === "crypto" && <Crypto hidden={hidden} />}
-        {tab === "realestate" && <RealEstate hidden={hidden} portfolio={portfolio} />}
-        {tab === "calendar" && <CalendarScreen events={events} onAdd={()=>setModal(true)} />}
+        {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>setAssetModalType("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
+        {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
+        {tab === "calendar" && <CalendarScreen events={events} onAdd={openEventModal} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 
-      <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? setModal(true) : setTab("ledger")}><Icon name="plus" /></button>
+      <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? openEventModal() : setTab("ledger")}><Icon name="plus" /></button>
       <nav className="bottom-nav" aria-label="주요 메뉴">
         {[{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}].map((item)=><button key={item.id} className={tab===item.id || (item.id==="stocks" && ["family","crypto","realestate"].includes(tab))?"active":""} onClick={()=>setTab(item.id as TabId)}><Icon name={item.icon}/><small>{item.label}</small></button>)}
       </nav>
       <div className="sr-only" aria-live="polite">현재 화면: {activeTitle}</div>
       {toast && <div className="toast" role="status">{toast}</div>}
-      {modal && <EventModal onClose={()=>setModal(false)} onSave={addEvent} />}
+      {modal && <EventModal initialDate={eventDate} onClose={()=>setModal(false)} onSave={addEvent} />}
+      {assetModalType&&<AssetModal initialType={assetModalType} onClose={()=>setAssetModalType(null)} onSave={createAsset}/>}
+      {debtModal&&<DebtModal onClose={()=>setDebtModal(false)} onSave={createDebt}/>}
+      {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
     </main>
   );
 }

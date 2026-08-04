@@ -2,14 +2,14 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "온리 · 우리 가족의 자산",
+  title: "모아 · 우리 가족의 자산",
   description: "성근, 지우, 윤재 가족이 함께 관리하는 비공개 자산 대시보드",
-  applicationName: "온리",
+  applicationName: "모아",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "온리",
+    title: "모아",
   },
   robots: { index: false, follow: false },
 };

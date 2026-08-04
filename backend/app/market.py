@@ -51,6 +51,41 @@ ALIASES = {
     "DIREXION SEMICONDUCTOR DAILY 3X": "SOXL",
 }
 
+COIN_ALIASES = {
+    "BTC": "BTC-KRW",
+    "비트코인": "BTC-KRW",
+    "ETH": "ETH-KRW",
+    "이더리움": "ETH-KRW",
+    "XRP": "XRP-KRW",
+    "리플": "XRP-KRW",
+    "SOL": "SOL-KRW",
+    "솔라나": "SOL-KRW",
+    "DOGE": "DOGE-KRW",
+    "도지코인": "DOGE-KRW",
+    "ADA": "ADA-KRW",
+    "에이다": "ADA-KRW",
+}
+
+
+def _is_crypto(asset_type: str) -> bool:
+    return asset_type.strip().lower() in {"코인", "암호화폐", "crypto", "cryptocurrency"}
+
+
+def normalize_user_symbol(asset_type: str, ticker: str, name: str = "") -> str:
+    """Normalize manually entered symbols, using KRW crypto pairs by default."""
+    symbol = ticker.strip().upper()
+    if not _is_crypto(asset_type):
+        return symbol
+    lookup = symbol or name.strip()
+    alias = COIN_ALIASES.get(lookup.upper()) or COIN_ALIASES.get(lookup)
+    if alias:
+        return alias
+    if symbol.endswith("-USD"):
+        return f"{symbol[:-4]}-KRW"
+    if symbol and "-" not in symbol:
+        return f"{symbol}-KRW"
+    return symbol
+
 
 def latest_exchange_rate(db: Session) -> ExchangeRateHistory | None:
     return db.scalar(select(ExchangeRateHistory).order_by(ExchangeRateHistory.captured_at.desc()))
@@ -68,7 +103,9 @@ def refresh_exchange_rate(db: Session) -> ExchangeRateHistory:
 
 def _auto_symbol(holding: Holding) -> str:
     if holding.ticker and holding.ticker_source == "user":
-        return holding.ticker.strip().upper()
+        return normalize_user_symbol(holding.asset_type, holding.ticker, holding.name)
+    if _is_crypto(holding.asset_type):
+        return normalize_user_symbol(holding.asset_type, holding.ticker, holding.name)
     if holding.name in ALIASES:
         return ALIASES[holding.name]
     if holding.ticker and not any("가" <= char <= "힣" for char in holding.name):
@@ -108,7 +145,36 @@ def _latest_price(symbol: str) -> float | None:
 
 
 def _is_krw_symbol(symbol: str) -> bool:
-    return symbol.endswith((".KS", ".KQ"))
+    return symbol.endswith((".KS", ".KQ", "-KRW"))
+
+
+def refresh_holding_quote(db: Session, holding: Holding) -> bool:
+    """Refresh one holding and keep its market value in KRW."""
+    symbol = _auto_symbol(holding)
+    if not symbol:
+        return False
+    price = _latest_price(symbol)
+    if price is None:
+        return False
+    holding.ticker = symbol
+    holding.ticker_source = holding.ticker_source or "user"
+    holding.currency = "KRW" if _is_krw_symbol(symbol) else "USD"
+    exchange = latest_exchange_rate(db)
+    fx = 1 if holding.currency == "KRW" else (exchange.rate if exchange else 0)
+    if not fx:
+        try:
+            fx = refresh_exchange_rate(db).rate
+        except Exception:
+            return False
+    if holding.quantity:
+        holding.market_value = holding.quantity * price * fx
+        holding.return_rate = (
+            (holding.market_value - holding.principal) / holding.principal if holding.principal else 0
+        )
+    holding.current_price = price
+    holding.price_source = "yfinance"
+    holding.price_updated_at = utcnow()
+    return True
 
 
 def _maybe_send_target_alert(db: Session, holding: Holding, price: float) -> tuple[int, int]:

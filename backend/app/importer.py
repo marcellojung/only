@@ -361,8 +361,11 @@ def parse_upload(content: bytes, filename: str) -> dict[str, list[dict[str, Any]
     }
 
 
-def _deactivate(db: Session, model, owner: str) -> None:  # type: ignore[no-untyped-def]
-    for item in db.scalars(select(model).where(model.owner == owner, model.is_active.is_(True))):
+def _deactivate(db: Session, model, owner: str, preserve_manual: bool = False) -> None:  # type: ignore[no-untyped-def]
+    query = select(model).where(model.owner == owner, model.is_active.is_(True))
+    if preserve_manual and hasattr(model, "source_key"):
+        query = query.where(~model.source_key.like("manual:%"))
+    for item in db.scalars(query):
         item.is_active = False
 
 
@@ -392,7 +395,7 @@ def import_upload(db: Session, content: bytes, filename: str, owner: str) -> dic
         new_transactions += 1
 
     if parsed["assets"]:
-        _deactivate(db, AssetItem, owner)
+        _deactivate(db, AssetItem, owner, preserve_manual=True)
         existing_assets = {
             item.source_key: item for item in db.scalars(select(AssetItem).where(AssetItem.owner == owner))
         }
@@ -407,7 +410,7 @@ def import_upload(db: Session, content: bytes, filename: str, owner: str) -> dic
                 db.add(AssetItem(owner=owner, source_key=source_key, is_active=True, **item))
 
     if parsed["holdings"]:
-        _deactivate(db, Holding, owner)
+        _deactivate(db, Holding, owner, preserve_manual=True)
         existing_holdings = {
             item.source_key: item for item in db.scalars(select(Holding).where(Holding.owner == owner))
         }
@@ -435,7 +438,7 @@ def import_upload(db: Session, content: bytes, filename: str, owner: str) -> dic
                 db.add(Holding(owner=owner, source_key=source_key, is_active=True, **item))
 
     if parsed["debts"]:
-        _deactivate(db, Debt, owner)
+        _deactivate(db, Debt, owner, preserve_manual=True)
         existing_debts = {
             item.source_key: item for item in db.scalars(select(Debt).where(Debt.owner == owner))
         }

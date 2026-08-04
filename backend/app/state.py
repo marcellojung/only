@@ -12,7 +12,7 @@ from .config import settings
 from .history import calculate_summary
 from .gowalter import archive_status
 from .market import latest_exchange_rate
-from .models import AIAnalysis, AlertEvent, AssetItem, Holding, ImportBatch, PortfolioSnapshot, Transaction
+from .models import AIAnalysis, AlertEvent, AssetItem, Debt, Holding, ImportBatch, PortfolioSnapshot, Transaction
 from .telegram import probe_telegram, telegram_configured
 
 
@@ -61,6 +61,16 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "message": archive_status()["source_label"],
             "detail": archive_status()["archive_dir"],
         },
+        "opendart": {
+            "configured": bool(settings.opendart_api_key),
+            "connected": bool(settings.opendart_api_key),
+            "message": "기업 리포트 사용 가능" if settings.opendart_api_key else "API 키 설정 필요",
+        },
+        "naver_news": {
+            "configured": bool((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)),
+            "connected": bool((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)),
+            "message": "최신 뉴스 검색 가능" if ((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)) else "API HUB 키 설정 필요",
+        },
         "telegram": {
             **telegram,
             "last_checked_at": _iso(last_alert.created_at) if last_alert else "",
@@ -108,6 +118,13 @@ def build_state(db: Session) -> dict[str, object]:
             select(Holding)
             .where(Holding.is_active.is_(True))
             .order_by(Holding.market_value.desc())
+        )
+    )
+    debts = list(
+        db.scalars(
+            select(Debt)
+            .where(Debt.is_active.is_(True))
+            .order_by(Debt.balance.desc())
         )
     )
     transactions = list(
@@ -177,6 +194,22 @@ def build_state(db: Session) -> dict[str, object]:
                 "target_alert_sent_at": _iso(item.target_alert_sent_at),
             }
             for item in holdings
+        ],
+        "debts": [
+            {
+                "id": item.id,
+                "owner": item.owner,
+                "debt_type": item.debt_type,
+                "provider": item.provider,
+                "name": item.name,
+                "principal": item.principal,
+                "balance": item.balance,
+                "interest_rate": item.interest_rate,
+                "opened_on": _iso(item.opened_on),
+                "matures_on": _iso(item.matures_on),
+                "manual": item.source_key.startswith("manual:"),
+            }
+            for item in debts
         ],
         "history": [
             {
