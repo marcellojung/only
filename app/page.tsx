@@ -131,6 +131,7 @@ type ServerState = {
     owner: "성근" | "지우" | "윤재" | "공통";
   }>;
   holdings: HoldingData[];
+  debts: DebtData[];
   history: Array<{ id: number; source: string; total_assets: number; total_debts: number; net_assets: number; investment_value: number; captured_at: string }>;
   exchange_rate: { pair: string; rate: number; source: string; updated_at: string };
   latest_analysis: { id: number; text: string; provider: string; model: string; created_at: string } | null;
@@ -154,6 +155,30 @@ type HoldingCreatePayload = {
   ticker: string;
   quantity: number;
   principal: number;
+};
+
+type DebtData = {
+  id:number;
+  owner:string;
+  debt_type:string;
+  provider:string;
+  name:string;
+  principal:number;
+  balance:number;
+  interest_rate:number;
+  opened_on:string;
+  matures_on:string;
+  manual:boolean;
+};
+
+type DebtCreatePayload = {
+  owner:string;
+  debt_type:string;
+  provider:string;
+  name:string;
+  principal:number;
+  balance:number;
+  interest_rate:number;
 };
 
 const navItems: { id: TabId; label: string }[] = [
@@ -483,7 +508,7 @@ function Crypto({ hidden, holdings, hiddenAssetKeys, busy, onRefresh, onAdd, onT
   );
 }
 
-function RealEstate({ hidden, assetHidden, onToggleHidden, portfolio }: { hidden: boolean; assetHidden:boolean; onToggleHidden:()=>void; portfolio: Portfolio }) {
+function RealEstate({ hidden, assetHidden, onToggleHidden, onAddDebt, portfolio, debts }: { hidden: boolean; assetHidden:boolean; onToggleHidden:()=>void; onAddDebt:()=>void; portfolio: Portfolio; debts:DebtData[] }) {
   const equity = Math.max(0, portfolio.realEstate - portfolio.totalDebts);
   const debtRatio = percentage(portfolio.totalDebts, portfolio.realEstate);
   return (
@@ -493,6 +518,8 @@ function RealEstate({ hidden, assetHidden, onToggleHidden, portfolio }: { hidden
       <article className="property-card"><div className="property-visual"><span>REAL ESTATE</span><div className="building"><i/><i/><i/><i/><i/><i/></div></div><div className="property-content"><span className="status-pill">뱅크샐러드</span><h2>등록 부동산</h2><p>{portfolio.asOf || "업데이트 전"} 평가 기준</p><div className="property-price"><span>현재 평가금액</span><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>원본 파일의 재무현황 합계</small></div></div></article>
       <div className="metric-grid property-metrics"><article className="metric-card"><p>총 부채</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></strong><small>자산현황에 연결된 부채</small></article><article className="metric-card"><p>부동산 순가치</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(equity)}</Amount></strong><small>부채비율 {debtRatio.toFixed(1)}%</small></article></div>
       <article className="panel loan-panel"><div className="panel-head"><div><span className="eyebrow">부채 비율</span><h2>부동산 대비</h2></div><strong><Amount hidden={assetHidden}>{debtRatio.toFixed(1)}%</Amount></strong></div><div className="progress"><i style={{width:`${Math.min(debtRatio,100)}%`}} /></div><div className="loan-stats"><span>부동산 평가액 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></b></span><span>총 부채 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></b></span></div></article>
+      <div className="section-title-row"><div><span className="eyebrow">등록 대출 {debts.length}건</span><h2>부동산 부채</h2></div><button className="primary-button small" onClick={onAddDebt}>＋ 부채 추가</button></div>
+      <div className="debt-list">{debts.length?debts.map((debt)=><article className="debt-row" key={debt.id}><span className="debt-symbol">₩</span><div><b>{debt.name}</b><small>{debt.provider||"금융사 미지정"} · {debt.owner} · {debt.debt_type}</small></div><p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(debt.balance)}</Amount></strong><small>{debt.interest_rate?`연 ${debt.interest_rate.toFixed(2)}%`:"금리 미입력"}{debt.manual?" · 직접 등록":" · 뱅크샐러드"}</small></p></article>):<article className="empty-card">뱅크샐러드에 없는 주담대·전세대출을 직접 추가할 수 있어요.</article>}</div>
     </section>
   );
 }
@@ -608,6 +635,35 @@ function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCrea
   </div></div>;
 }
 
+function DebtModal({ onClose, onSave }: { onClose:()=>void; onSave:(payload:DebtCreatePayload)=>Promise<void> }) {
+  const [saving,setSaving] = useState(false);
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      await onSave({
+        owner:String(form.get("owner")), debt_type:String(form.get("debt_type")),
+        provider:String(form.get("provider")), name:String(form.get("name")),
+        principal:Number(form.get("principal")) || 0, balance:Number(form.get("balance")),
+        interest_rate:Number(form.get("interest_rate")) || 0,
+      });
+    } finally { setSaving(false); }
+  }
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal debt-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <div className="modal-head"><div><span className="eyebrow">직접 등록</span><h2>부동산 부채 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
+    <form onSubmit={submit}>
+      <div className="form-row"><label>대출 종류<select name="debt_type" defaultValue="주택담보대출"><option>주택담보대출</option><option>전세자금대출</option><option>중도금대출</option><option>기타 부동산 대출</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
+      <label>대출 이름<input name="name" placeholder="예: 아파트 주택담보대출" required autoFocus /></label>
+      <label>금융사<input name="provider" placeholder="예: 국민은행" /></label>
+      <div className="form-row"><label>현재 잔액(원)<input name="balance" type="number" min="1" step="1" placeholder="320000000" required /></label><label>최초 대출금(원)<input name="principal" type="number" min="0" step="1" placeholder="선택 입력" /></label></div>
+      <label>금리(연 %)<input name="interest_rate" type="number" min="0" max="100" step="0.01" placeholder="3.80" /></label>
+      <p className="form-hint">직접 등록한 부채는 뱅크샐러드 파일을 다시 올려도 유지됩니다.</p>
+      <button className="primary-button full" disabled={saving}>{saving?"등록 중…":"부채 등록"}</button>
+    </form>
+  </div></div>;
+}
+
 function EventModal({ initialDate, onClose, onSave }: { initialDate:string; onClose: () => void; onSave: (event: CalendarEvent) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -633,6 +689,7 @@ export default function Home() {
   const [modal, setModal] = useState(false);
   const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
+  const [debtModal,setDebtModal] = useState(false);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [protectedMode, setProtectedMode] = useState(false);
@@ -804,6 +861,21 @@ export default function Home() {
     } finally { setBusy(""); }
   }
 
+  async function createDebt(payload:DebtCreatePayload) {
+    setBusy("debt");
+    try {
+      const response = await fetch("/backend/debts",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
+      const result = await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"부채를 등록하지 못했습니다.");
+      await loadState(sessionStorage.getItem("family-key")||"");
+      setDebtModal(false);
+      setToast("부채를 등록하고 순자산에 반영했어요.");
+    } catch(error) {
+      setToast(error instanceof Error?error.message:"부채를 등록하지 못했습니다.");
+      throw error;
+    } finally { setBusy(""); }
+  }
+
   async function openStockReport(item:HoldingData) {
     setReportItem(item);
     setStockReport(null);
@@ -872,7 +944,7 @@ export default function Home() {
         {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>setAssetModalType("주식")} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>setAssetModalType("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
-        {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} portfolio={portfolio} />}
+        {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
         {tab === "calendar" && <CalendarScreen events={events} onAdd={openEventModal} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
@@ -885,6 +957,7 @@ export default function Home() {
       {toast && <div className="toast" role="status">{toast}</div>}
       {modal && <EventModal initialDate={eventDate} onClose={()=>setModal(false)} onSave={addEvent} />}
       {assetModalType&&<AssetModal initialType={assetModalType} onClose={()=>setAssetModalType(null)} onSave={createAsset}/>}
+      {debtModal&&<DebtModal onClose={()=>setDebtModal(false)} onSave={createDebt}/>}
       {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
     </main>
   );

@@ -17,7 +17,7 @@ from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
 from .importer import import_upload
 from .market import normalize_user_symbol, refresh_exchange_rate, refresh_holding_quote, refresh_market
-from .models import AlertEvent, Holding
+from .models import AlertEvent, Debt, Holding
 from .news import search_company_news
 from .opendart import build_holding_report
 from .prompts import build_stock_prompts
@@ -61,6 +61,16 @@ class HoldingCreate(BaseModel):
     ticker: str = Field(default="", max_length=40)
     quantity: float = Field(gt=0)
     principal: float = Field(default=0, ge=0)
+
+
+class DebtCreate(BaseModel):
+    owner: str = Field(default="공통", min_length=1, max_length=30)
+    debt_type: str = Field(default="주택담보대출", min_length=1, max_length=80)
+    provider: str = Field(default="", max_length=120)
+    name: str = Field(min_length=1, max_length=300)
+    principal: float = Field(default=0, ge=0)
+    balance: float = Field(gt=0)
+    interest_rate: float = Field(default=0, ge=0, le=100)
 
 
 class AnalysisPayload(BaseModel):
@@ -147,6 +157,26 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
     create_portfolio_snapshot(db, source="holding_create")
     db.commit()
     return {"ok": True, "holding_id": holding.id, "quote_updated": quote_updated, "ticker": holding.ticker}
+
+
+@app.post("/api/debts", dependencies=[Depends(authorize)])
+def create_debt(payload: DebtCreate, db: Session = Depends(get_db)) -> dict[str, object]:
+    debt = Debt(
+        owner=payload.owner.strip(),
+        source_key=f"manual:{uuid4().hex}",
+        debt_type=payload.debt_type.strip(),
+        provider=payload.provider.strip(),
+        name=payload.name.strip(),
+        principal=payload.principal or payload.balance,
+        balance=payload.balance,
+        interest_rate=payload.interest_rate,
+        is_active=True,
+    )
+    db.add(debt)
+    db.flush()
+    create_portfolio_snapshot(db, source="debt_create")
+    db.commit()
+    return {"ok": True, "debt_id": debt.id, "balance": debt.balance}
 
 
 @app.patch("/api/holdings/{holding_id}", dependencies=[Depends(authorize)])
