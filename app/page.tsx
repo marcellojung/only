@@ -96,6 +96,26 @@ type GowalterPrompt = {
   related_posts: Array<{ title: string; url: string; published_at: string; summary: string }>;
 };
 
+type StockReport = {
+  holding_id: number;
+  name: string;
+  ticker: string;
+  generated_at: string;
+  broker_research: Array<{ provider: string; title: string; description: string; url: string; kind: string }>;
+  news: { configured: boolean; provider: string; message: string; items: Array<{ title: string; summary: string; url: string; published_at: string }> };
+  prompts: Array<{ id: string; title: string; description: string; text: string }>;
+  dart: {
+    configured: boolean;
+    available: boolean;
+    message: string;
+    basis: string;
+    metrics: Array<{ key: string; label: string; current: number; previous: number | null; change_rate: number | null }>;
+    ratios: Array<{ label: string; value: number }>;
+    analysis: { summary: string; observations: string[]; cautions: string[] } | null;
+    disclosures: Array<{ title: string; date: string; submitter: string; url: string }>;
+  };
+};
+
 type ServerState = {
   protected: boolean;
   updated_at: string;
@@ -303,7 +323,7 @@ function Family({ hidden, portfolio, members }: { hidden: boolean; portfolio: Po
   );
 }
 
-function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void> }) {
+function HoldingCard({ item, index, totalValue, hidden, onSave, onOpenReport }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
@@ -329,7 +349,7 @@ function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: Holdin
         <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</b><span>수익</span></div>
         <div className="return-track"><i className="zero-line"/><i className="return-marker" style={{left:`${meterPosition}%`}}/><span className="loss-zone"/><span className="gain-zone"/></div>
       </div>
-      <div className="holding-detail-line"><span>{item.quantity?`${money(item.quantity)}주 보유`:"수량 확인 전"}</span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
+      <div className="holding-detail-line"><span>{item.quantity?`${money(item.quantity)}주 보유`:"수량 확인 전"}</span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
     </div>
     {editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
@@ -338,6 +358,29 @@ function HoldingCard({ item, index, totalValue, hidden, onSave }: { item: Holdin
       <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
     </form>}
   </article>;
+}
+
+function StockReportModal({ item, report, loading, error, onClose }: { item: HoldingData; report: StockReport | null; loading: boolean; error: string; onClose:()=>void }) {
+  const [copiedPrompt,setCopiedPrompt] = useState("");
+  async function copyPrompt(id:string,text:string) {
+    await navigator.clipboard.writeText(text);
+    setCopiedPrompt(id);
+    window.setTimeout(()=>setCopiedPrompt(""),1800);
+  }
+  return <div className="modal-backdrop report-backdrop" onMouseDown={onClose}><article className="stock-report-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <header className="report-head"><div><span className="eyebrow">종목 상세 · {item.ticker||"티커 미설정"}</span><h2>{item.name}</h2><p>OpenDART 자체 분석, 최신 뉴스와 증권사 리서치를 한곳에서 확인합니다.</p></div><button onClick={onClose} aria-label="닫기">×</button></header>
+    {loading&&<div className="report-loading"><i/><p>공시와 재무제표를 불러오는 중이에요.</p></div>}
+    {error&&<div className="report-notice error">{error}</div>}
+    {!loading&&report&&<div className="report-body">
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">OpenDART · LLM 불필요</span><h3>상세 종목 분석</h3></div>{report.dart.basis&&<span className="chip">{report.dart.basis}</span>}</div><p className={`report-notice ${report.dart.available?"ready":""}`}>{report.dart.message}</p>
+        {report.dart.available&&<><div className="report-metrics">{report.dart.metrics.map((metric)=><article key={metric.key}><span>{metric.label}</span><strong>{compactMoney(metric.current)}</strong><small className={metric.change_rate==null?"":metric.change_rate<0?"negative":"positive"}>{metric.change_rate==null?"전년 비교 없음":`전년 대비 ${metric.change_rate>=0?"+":""}${(metric.change_rate*100).toFixed(1)}%`}</small></article>)}</div><div className="ratio-row">{report.dart.ratios.map((ratio)=><span key={ratio.label}><small>{ratio.label}</small><b>{(ratio.value*100).toFixed(1)}%</b></span>)}</div>{report.dart.analysis&&<div className="report-analysis"><div><h4>확인된 흐름</h4><ul>{report.dart.analysis.observations.map((text)=><li key={text}>{text}</li>)}</ul></div><div><h4>함께 볼 점</h4><ul>{report.dart.analysis.cautions.map((text)=><li key={text}>{text}</li>)}</ul></div></div>}</>}
+      </section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">{report.news.provider}</span><h3>최근 종목 뉴스</h3></div></div><p className={`report-notice ${report.news.items.length?"ready":""}`}>{report.news.message}</p><div className="news-list">{report.news.items.map((news)=><a key={`${news.url}-${news.published_at}`} href={news.url} target="_blank" rel="noreferrer"><div><time>{news.published_at.slice(0,10)||"날짜 미상"}</time><b>{news.title}</b><p>{news.summary}</p></div><span>↗</span></a>)}</div></section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">External research</span><h3>증권사 리포트 검색</h3></div></div><div className="research-links">{report.broker_research.length?report.broker_research.map((link)=><a key={`${link.provider}-${link.kind}`} href={link.url} target="_blank" rel="noreferrer"><span>{link.provider.slice(0,2)}</span><div><b>{link.title}</b><small>{link.description}</small></div><i>↗</i></a>):<p className="report-notice">국내 6자리 종목코드를 설정하면 검색할 수 있습니다.</p>}</div></section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">Copy & analyze</span><h3>종목분석 프롬프트</h3></div></div><div className="prompt-list">{report.prompts.map((prompt)=><details key={prompt.id} className="prompt-card"><summary><div><b>{prompt.title}</b><small>{prompt.description}</small></div><span>펼쳐보기⌄</span></summary><div className="prompt-content"><button onClick={()=>void copyPrompt(prompt.id,prompt.text)}>{copiedPrompt===prompt.id?"✓ 복사됨":"프롬프트 복사"}</button><pre>{prompt.text}</pre></div></details>)}</div></section>
+      {!!report.dart.disclosures.length&&<section className="report-section"><div className="report-title"><div><span className="eyebrow">최근 1년</span><h3>주요 공시</h3></div></div><div className="disclosure-list">{report.dart.disclosures.map((item)=><a key={`${item.date}-${item.url}`} href={item.url} target="_blank" rel="noreferrer"><time>{item.date.replace(/(\d{4})(\d{2})(\d{2})/,"$1.$2.$3")}</time><b>{item.title}</b><span>↗</span></a>)}</div></section>}
+    </div>}
+  </article></div>;
 }
 
 function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: GowalterPrompt; busy: string; onAnalyze:(prompt?:string)=>Promise<void> }) {
@@ -353,7 +396,7 @@ function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: Gowa
   </article>;
 }
 
-function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void> }) {
+function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport }: { hidden: boolean; holdings: HoldingData[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
   const value = summary?.investment_value || holdings.reduce((sum,item)=>sum+item.market_value,0);
@@ -409,7 +452,7 @@ function Stocks({ hidden, holdings, summary, exchangeRate, analysis, promptData,
       {analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
       {promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>}
       <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><span className="chip">평가액순</span></div>
-      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} onSave={onSave}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">뱅크샐러드 파일을 올리면 투자상품이 여기에 표시됩니다.</article>}</div>
     </section>
   );
 }
@@ -499,6 +542,8 @@ const integrationLabels: Record<string,[string,string,string]> = {
   market:["↗","환율·현재가","Yahoo Finance / yfinance"],
   openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
   gowalter:["G","Gowalter 관점 아카이브","블로그·투자 원칙·어록"],
+  opendart:["D","OpenDART 기업 리포트","공시·재무제표 기반 정형 분석"],
+  naver_news:["N","네이버 최신 뉴스","NAVER API HUB 뉴스 검색"],
   telegram:["T","Telegram 목표가 알림","목표가 도달 알림"],
   google_calendar:["G","Google 캘린더","공유 일정 읽기 · 추가"],
 };
@@ -542,6 +587,10 @@ export default function Home() {
   const [locked, setLocked] = useState(false);
   const [accessKey, setAccessKey] = useState("");
   const [busy, setBusy] = useState("");
+  const [reportItem,setReportItem] = useState<HoldingData|null>(null);
+  const [stockReport,setStockReport] = useState<StockReport|null>(null);
+  const [reportLoading,setReportLoading] = useState(false);
+  const [reportError,setReportError] = useState("");
 
   useEffect(() => {
     void loadState(sessionStorage.getItem("family-key") || "");
@@ -665,6 +714,23 @@ export default function Home() {
     } catch(error){setToast(error instanceof Error?error.message:"종목 설정을 저장하지 못했어요.");} finally{setBusy("");}
   }
 
+  async function openStockReport(item:HoldingData) {
+    setReportItem(item);
+    setStockReport(null);
+    setReportError("");
+    setReportLoading(true);
+    try {
+      const response=await fetch(`/backend/holdings/${item.id}/report`,{headers:authHeaders(),cache:"no-store"});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"종목 리포트를 불러오지 못했습니다.");
+      setStockReport(result as StockReport);
+    } catch(error) {
+      setReportError(error instanceof Error?error.message:"종목 리포트를 불러오지 못했습니다.");
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   async function probeIntegrations() {
     setBusy("probe");
     try {
@@ -699,7 +765,7 @@ export default function Home() {
       <div className="content">
         {tab === "summary" && <Summary hidden={hidden} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} />}
+        {tab === "stocks" && <Stocks hidden={hidden} holdings={serverState?.holdings||[]} summary={serverState?.summary} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} />}
         {tab === "realestate" && <RealEstate hidden={hidden} portfolio={portfolio} />}
@@ -714,6 +780,7 @@ export default function Home() {
       <div className="sr-only" aria-live="polite">현재 화면: {activeTitle}</div>
       {toast && <div className="toast" role="status">{toast}</div>}
       {modal && <EventModal onClose={()=>setModal(false)} onSave={addEvent} />}
+      {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
     </main>
   );
 }

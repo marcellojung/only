@@ -61,6 +61,16 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "message": archive_status()["source_label"],
             "detail": archive_status()["archive_dir"],
         },
+        "opendart": {
+            "configured": bool(settings.opendart_api_key),
+            "connected": bool(settings.opendart_api_key),
+            "message": "기업 리포트 사용 가능" if settings.opendart_api_key else "API 키 설정 필요",
+        },
+        "naver_news": {
+            "configured": bool((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)),
+            "connected": bool((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)),
+            "message": "최신 뉴스 검색 가능" if ((settings.naver_api_hub_client_id and settings.naver_api_hub_client_secret) or (settings.naver_client_id and settings.naver_client_secret)) else "API HUB 키 설정 필요",
+        },
         "telegram": {
             **telegram,
             "last_checked_at": _iso(last_alert.created_at) if last_alert else "",

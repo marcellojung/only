@@ -17,6 +17,9 @@ from .history import create_portfolio_snapshot
 from .importer import import_upload
 from .market import refresh_exchange_rate, refresh_market
 from .models import AlertEvent, Holding
+from .news import search_company_news
+from .opendart import build_holding_report
+from .prompts import build_stock_prompts
 from .state import build_state, integrations
 from .telegram import send_telegram_message
 
@@ -122,6 +125,17 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
     create_portfolio_snapshot(db, source="holding_update")
     db.commit()
     return {"ok": True, "holding_id": holding.id}
+
+
+@app.get("/api/holdings/{holding_id}/report", dependencies=[Depends(authorize)])
+def holding_report(holding_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
+    holding = db.get(Holding, holding_id)
+    if not holding or not holding.is_active:
+        raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
+    report = build_holding_report(holding)
+    report["news"] = search_company_news(holding)
+    report["prompts"] = build_stock_prompts(holding, report)
+    return report
 
 
 @app.post("/api/ai/analyze", dependencies=[Depends(authorize)])
