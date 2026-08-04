@@ -147,6 +147,14 @@ type CalendarEvent = {
   color?: string;
 };
 
+type CalendarConnectionStatus = {
+  configured:boolean;
+  connected:boolean;
+  message:string;
+  calendarName?:string;
+  calendarId?:string;
+};
+
 type HoldingCreatePayload = {
   owner: string;
   asset_type: "주식" | "ETF" | "펀드" | "코인";
@@ -502,8 +510,8 @@ function Crypto({ hidden, holdings, hiddenAssetKeys, busy, onRefresh, onAdd, onT
     <section className="screen fade-in">
       <ScreenHeading eyebrow="암호화폐" title="코인도 원화로 한눈에" copy="거래소와 별개로 수량을 등록하면 원화 시세와 평가금액을 갱신해요." />
       <article className="investment-hero crypto-hero"><span>암호화폐 평가금액</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={value-principal<0?"negative":""}>{value-principal>=0?"+":""}{compactMoney(value-principal)}</strong><div className="crypto-rings"><i /><i /><i /></div></article>
-      <div className="market-actions"><div><span className="eyebrow">KRW 시세</span><b>Yahoo Finance 원화 페어</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 원화 시세 갱신"}</button><button className="filter-button" onClick={onAdd}>＋ 코인 추가</button></div>
-      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={value} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">비트코인, 이더리움 등 보유 코인을 직접 추가해 주세요.</article>}</div>
+      <div className="market-actions crypto-actions"><div><span className="eyebrow">KRW 시세</span><b>Yahoo Finance 원화 페어</b></div><button type="button" className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 원화 시세 갱신"}</button><button type="button" className="filter-button crypto-add-button" onClick={onAdd}>＋ 암호화폐 추가</button></div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={value} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card crypto-empty">비트코인, 이더리움 등 보유 코인을 직접 추가해 주세요.<button type="button" className="primary-button small" onClick={onAdd}>첫 암호화폐 추가</button></article>}</div>
     </section>
   );
 }
@@ -513,7 +521,7 @@ function RealEstate({ hidden, assetHidden, onToggleHidden, onAddDebt, portfolio,
   const debtRatio = percentage(portfolio.totalDebts, portfolio.realEstate);
   return (
     <section className="screen fade-in">
-      <div className="asset-heading-row"><ScreenHeading eyebrow="부동산" title="우리 집의 오늘 가치" copy="매입가, 현재 시세와 대출을 함께 관리해요." /><button className="asset-visibility-button" onClick={onToggleHidden}>{assetHidden?"부동산 표시":"부동산 숨기기"}</button></div>
+      <div className="asset-heading-row"><ScreenHeading eyebrow="부동산" title="우리 집의 오늘 가치" copy="매입가, 현재 시세와 대출을 함께 관리해요." /><button type="button" className={`asset-visibility-button ${assetHidden?"active":""}`} aria-pressed={assetHidden} onClick={onToggleHidden}>{assetHidden?"✓ 부동산 표시하기":"부동산 금액 숨기기"}</button></div>
       {assetHidden&&<div className="asset-privacy-banner">이 기기에서 부동산 금액을 개별 숨김 처리했습니다.</div>}
       <article className="property-card"><div className="property-visual"><span>REAL ESTATE</span><div className="building"><i/><i/><i/><i/><i/><i/></div></div><div className="property-content"><span className="status-pill">뱅크샐러드</span><h2>등록 부동산</h2><p>{portfolio.asOf || "업데이트 전"} 평가 기준</p><div className="property-price"><span>현재 평가금액</span><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>원본 파일의 재무현황 합계</small></div></div></article>
       <div className="metric-grid property-metrics"><article className="metric-card"><p>총 부채</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></strong><small>자산현황에 연결된 부채</small></article><article className="metric-card"><p>부동산 순가치</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(equity)}</Amount></strong><small>부채비율 {debtRatio.toFixed(1)}%</small></article></div>
@@ -555,7 +563,7 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   );
 }
 
-function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: (date?:string) => void }) {
+function CalendarScreen({ events, status, checking, onCheck, onAdd }: { events: CalendarEvent[]; status:CalendarConnectionStatus|null; checking:boolean; onCheck:()=>void; onAdd: (date?:string) => void }) {
   const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -566,6 +574,9 @@ function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: (da
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="Google Calendar" title="우리의 공동 일정" copy="서로 추가한 일정이 Google 캘린더와 함께 업데이트돼요." />
+      <article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
+        <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button>
+      </article>
       <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
@@ -688,6 +699,7 @@ export default function Home() {
   const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
   const [modal, setModal] = useState(false);
   const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
+  const [calendarStatus,setCalendarStatus] = useState<CalendarConnectionStatus|null>(null);
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
   const [debtModal,setDebtModal] = useState(false);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
@@ -838,12 +850,14 @@ export default function Home() {
   }
 
   function toggleAssetHidden(key:string,label:string) {
-    setHiddenAssetKeys((current)=>{
-      const next = current.includes(key) ? current.filter((item)=>item!==key) : [...current,key];
-      localStorage.setItem("moa-hidden-assets",JSON.stringify(next));
-      setToast(`${label} ${next.includes(key)?"숨김":"표시"} 처리했어요.`);
-      return next;
-    });
+    const next = hiddenAssetKeys.includes(key) ? hiddenAssetKeys.filter((item)=>item!==key) : [...hiddenAssetKeys,key];
+    setHiddenAssetKeys(next);
+    localStorage.setItem("moa-hidden-assets",JSON.stringify(next));
+    setToast(`${label} ${next.includes(key)?"숨김":"표시"} 처리했어요.`);
+  }
+
+  function openAssetModal(type:HoldingCreatePayload["asset_type"]) {
+    setAssetModalType(type);
   }
 
   async function createAsset(payload:HoldingCreatePayload) {
@@ -915,6 +929,21 @@ export default function Home() {
     setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 저장했어요. Google 연동 후 자동 동기화됩니다.");
   }
 
+  async function checkCalendar() {
+    setBusy("calendar");
+    try {
+      const response = await fetch("/api/calendar",{headers:authHeaders(),cache:"no-store"});
+      const result = await response.json().catch(()=>({message:"연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus;
+      if(!response.ok)throw new Error(result.message||"연결 확인 실패");
+      setCalendarStatus(result);
+      setToast(result.connected?"Google Calendar 연결을 확인했어요.":result.message);
+    } catch(error) {
+      const message = error instanceof Error?error.message:"Google Calendar 연결 확인 실패";
+      setCalendarStatus({configured:false,connected:false,message});
+      setToast(message);
+    } finally { setBusy(""); }
+  }
+
   function openEventModal(date = new Date().toISOString().slice(0,10)) {
     setEventDate(date);
     setModal(true);
@@ -941,11 +970,11 @@ export default function Home() {
       <div className="content">
         {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>setAssetModalType("주식")} />}
+        {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
-        {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>setAssetModalType("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
+        {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
-        {tab === "calendar" && <CalendarScreen events={events} onAdd={openEventModal} />}
+        {tab === "calendar" && <CalendarScreen events={events} status={calendarStatus} checking={busy==="calendar"} onCheck={()=>void checkCalendar()} onAdd={openEventModal} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 

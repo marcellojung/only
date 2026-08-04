@@ -1,6 +1,13 @@
 import { createSign } from "node:crypto";
 
 type NewCalendarEvent = { title: string; date: string; time?: string; owner?: string };
+export type CalendarConnectionStatus = {
+  configured: boolean;
+  connected: boolean;
+  message: string;
+  calendarName?: string;
+  calendarId?: string;
+};
 
 function base64Url(value: string) {
   return Buffer.from(value).toString("base64url");
@@ -20,6 +27,37 @@ async function accessToken() {
   const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${header}.${payload}.${signature}` }) });
   if (!response.ok) throw new Error("Google token request failed");
   return (await response.json() as { access_token: string }).access_token;
+}
+
+function missingCalendarSettings() {
+  const missing:string[] = [];
+  if (!process.env.GOOGLE_CALENDAR_ID) missing.push("GOOGLE_CALENDAR_ID");
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) missing.push("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  if (!process.env.GOOGLE_PRIVATE_KEY) missing.push("GOOGLE_PRIVATE_KEY");
+  return missing;
+}
+
+export async function checkCalendarConnection():Promise<CalendarConnectionStatus> {
+  const missing = missingCalendarSettings();
+  if (missing.length) {
+    return { configured:false, connected:false, message:`환경변수 입력 필요: ${missing.join(", ")}` };
+  }
+  try {
+    const token = await accessToken();
+    const calendarId = process.env.GOOGLE_CALENDAR_ID as string;
+    if (!token) return { configured:true, connected:false, message:"서비스 계정 인증 토큰을 만들지 못했습니다." };
+    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}`, {
+      headers:{ authorization:`Bearer ${token}` }, cache:"no-store",
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(()=>({})) as { error?:{ message?:string } };
+      return { configured:true, connected:false, message:result.error?.message || `캘린더 접근 실패 (${response.status})` };
+    }
+    const calendar = await response.json() as { id?:string; summary?:string };
+    return { configured:true, connected:true, message:"Google Calendar 연결 성공", calendarName:calendar.summary||"공유 캘린더", calendarId:calendar.id||calendarId };
+  } catch(error) {
+    return { configured:true, connected:false, message:error instanceof Error?error.message:"Google Calendar 연결 확인 실패" };
+  }
 }
 
 export async function createCalendarEvent(event: NewCalendarEvent) {

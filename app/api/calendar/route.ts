@@ -1,7 +1,12 @@
-import { createCalendarEvent } from "../../../lib/google-calendar";
+import { checkCalendarConnection, createCalendarEvent } from "../../../lib/google-calendar";
 import { isAuthorized } from "../../../lib/store";
 
 export const runtime = "nodejs";
+
+export async function GET(request: Request) {
+  if (!isAuthorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  return Response.json(await checkCalendarConnection());
+}
 
 export async function POST(request: Request) {
   if (!isAuthorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
