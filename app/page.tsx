@@ -212,17 +212,17 @@ const isCryptoHolding = (item: HoldingData) => ["코인", "암호화폐", "crypt
 const assetKey = (item: HoldingData) => `holding:${item.id}`;
 
 function Icon({ name }: { name: string }) {
-  const icons: Record<string, string> = {
-    home: "⌂",
-    chart: "↗",
-    wallet: "₩",
-    calendar: "□",
-    settings: "⚙",
-    eye: "◉",
-    plus: "+",
-    lock: "●",
+  const paths:Record<string,ReactNode> = {
+    home:<><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-6h6v6"/></>,
+    chart:<><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><path d="m15 6 3-3 3 3"/></>,
+    wallet:<><path d="M3 6.5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13"/><path d="M16 11h5v5h-5a2.5 2.5 0 0 1 0-5Z"/></>,
+    calendar:<><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></>,
+    settings:<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></>,
+    eye:<><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></>,
+    eyeOff:<><path d="m3 3 18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.1 2.8M6.5 7.3A15.4 15.4 0 0 0 2.5 12s3.5 6 9.5 6a9 9 0 0 0 3.2-.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+    plus:<path d="M12 5v14M5 12h14"/>,
   };
-  return <span aria-hidden="true">{icons[name] ?? "•"}</span>;
+  return <svg className="app-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] ?? <circle cx="12" cy="12" r="2" fill="currentColor"/>}</svg>;
 }
 
 function Amount({ children, hidden }: { children: ReactNode; hidden: boolean }) {
@@ -528,8 +528,8 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   );
 }
 
-function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: () => void }) {
-  const [cursor, setCursor] = useState(new Date(2026, 7, 1));
+function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: (date?:string) => void }) {
+  const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -539,15 +539,16 @@ function CalendarScreen({ events, onAdd }: { events: CalendarEvent[]; onAdd: () 
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="Google Calendar" title="우리의 공동 일정" copy="서로 추가한 일정이 Google 캘린더와 함께 업데이트돼요." />
-      <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date(2026,7,1))}>오늘</button></div>
+      <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
-        const event = monthEvents.find((item)=>item.date===dateKey);
-        const isToday = year===2026 && month===7 && day===3;
-        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <><span>{day}</span>{event && <i className={`event-dot ${event.color || "mint"}`} title={event.title}/>}</>}</div>
+        const dayEvents = monthEvents.filter((item)=>item.date===dateKey);
+        const today = new Date();
+        const isToday = year===today.getFullYear() && month===today.getMonth() && day===today.getDate();
+        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
       })}</div></article>
-      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={onAdd}>＋ 일정 추가</button></div>
-      <div className="event-list">{monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>8월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}</small></div><span>›</span></article>)}</div>
+      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button></div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}</small></div><span>›</span></article>):<div className="calendar-empty">날짜를 눌러 가족 일정을 추가해 보세요.</div>}</div>
       <a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>
     </section>
   );
@@ -607,16 +608,17 @@ function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCrea
   </div></div>;
 }
 
-function EventModal({ onClose, onSave }: { onClose: () => void; onSave: (event: CalendarEvent) => void }) {
+function EventModal({ initialDate, onClose, onSave }: { initialDate:string; onClose: () => void; onSave: (event: CalendarEvent) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setSaving(true);
-    onSave({ id: crypto.randomUUID(), title: String(form.get("title")), date: String(form.get("date")), time: String(form.get("time")), owner: String(form.get("owner")) as CalendarEvent["owner"], color: "mint" });
-    setSaving(false);
+    try {
+      await onSave({ id: crypto.randomUUID(), title: String(form.get("title")), date: String(form.get("date")), time: String(form.get("time")), owner: String(form.get("owner")) as CalendarEvent["owner"], color: String(form.get("color")) });
+    } finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Google Calendar</span><h2>가족 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 가족 저녁" required /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue="2026-08-16" required /></label><label>시간<input name="time" type="time" defaultValue="18:00" /></label></div><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지우</option><option>윤재</option></select></label><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"Google 캘린더에 추가"}</button></form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">Family Calendar</span><h2>가족 일정 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div><form onSubmit={submit}><label>일정 이름<input name="title" placeholder="예: 가족 저녁" required autoFocus /></label><div className="form-row"><label>날짜<input name="date" type="date" defaultValue={initialDate} required /></label><label>시간<input name="time" type="time" /></label></div><div className="form-row"><label>공유 대상<select name="owner" defaultValue="공통"><option>공통</option><option>성근</option><option>지우</option><option>윤재</option></select></label><label>표시 색상<select name="color" defaultValue="mint"><option value="mint">초록</option><option value="blue">파랑</option><option value="pink">분홍</option><option value="amber">주황</option><option value="violet">보라</option></select></label></div><p className="form-hint">Google Calendar가 연결되어 있으면 저장과 동시에 공유 캘린더에도 추가됩니다.</p><button className="primary-button full" disabled={saving}>{saving?"저장 중...":"일정 저장"}</button></form></div></div>;
 }
 
 export default function Home() {
@@ -629,6 +631,7 @@ export default function Home() {
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
   const [modal, setModal] = useState(false);
+  const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
   const [toast, setToast] = useState("");
@@ -649,6 +652,13 @@ export default function Home() {
         const parsed = JSON.parse(savedHidden) as string[];
         window.setTimeout(()=>setHiddenAssetKeys(parsed),0);
       } catch { localStorage.removeItem("moa-hidden-assets"); }
+    }
+    const savedEvents = localStorage.getItem("moa-calendar-events");
+    if (savedEvents) {
+      try {
+        const parsed = JSON.parse(savedEvents) as CalendarEvent[];
+        window.setTimeout(()=>setEvents(parsed),0);
+      } catch { localStorage.removeItem("moa-calendar-events"); }
     }
     // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
@@ -822,11 +832,20 @@ export default function Home() {
   }
 
   async function addEvent(event: CalendarEvent) {
-    setEvents((current)=>[...current,event].sort((a,b)=>a.date.localeCompare(b.date)));
+    setEvents((current)=>{
+      const next = [...current,event].sort((a,b)=>a.date.localeCompare(b.date));
+      localStorage.setItem("moa-calendar-events",JSON.stringify(next));
+      return next;
+    });
     setModal(false);
     const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
     const result = response?.ok ? await response.json().catch(()=>null) : null;
     setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 저장했어요. Google 연동 후 자동 동기화됩니다.");
+  }
+
+  function openEventModal(date = new Date().toISOString().slice(0,10)) {
+    setEventDate(date);
+    setModal(true);
   }
 
   if (locked) {
@@ -841,8 +860,8 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={()=>setTab("summary")} aria-label="온리 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>온리</b><small>우리 가족의 자산</small></span></button>
-        <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name="eye" /></button><button className="avatar-button">우</button></div>
+        <button className="brand" onClick={()=>setTab("summary")} aria-label="모아 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>모아</b><small>우리 가족의 자산</small></span></button>
+        <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name={hidden?"eyeOff":"eye"} /></button><button className="avatar-button">우</button></div>
       </header>
 
       <nav className="top-nav" aria-label="전체 메뉴">{navItems.map((item)=><button key={item.id} className={tab===item.id?"active":""} onClick={()=>setTab(item.id)}>{item.label}</button>)}</nav>
@@ -854,17 +873,17 @@ export default function Home() {
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>setAssetModalType("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} portfolio={portfolio} />}
-        {tab === "calendar" && <CalendarScreen events={events} onAdd={()=>setModal(true)} />}
+        {tab === "calendar" && <CalendarScreen events={events} onAdd={openEventModal} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 
-      <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? setModal(true) : setTab("ledger")}><Icon name="plus" /></button>
+      <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? openEventModal() : setTab("ledger")}><Icon name="plus" /></button>
       <nav className="bottom-nav" aria-label="주요 메뉴">
         {[{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}].map((item)=><button key={item.id} className={tab===item.id || (item.id==="stocks" && ["family","crypto","realestate"].includes(tab))?"active":""} onClick={()=>setTab(item.id as TabId)}><Icon name={item.icon}/><small>{item.label}</small></button>)}
       </nav>
       <div className="sr-only" aria-live="polite">현재 화면: {activeTitle}</div>
       {toast && <div className="toast" role="status">{toast}</div>}
-      {modal && <EventModal onClose={()=>setModal(false)} onSave={addEvent} />}
+      {modal && <EventModal initialDate={eventDate} onClose={()=>setModal(false)} onSave={addEvent} />}
       {assetModalType&&<AssetModal initialType={assetModalType} onClose={()=>setAssetModalType(null)} onSave={createAsset}/>}
       {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
     </main>

@@ -8,4 +8,4 @@ if (Test-Path $PidFile) {
     Remove-Item $PidFile -Force
 }
 
-Write-Host "온리 자산 앱을 중지했습니다. Tailscale 비공개 네트워크는 유지됩니다."
+Write-Host "모아 자산 앱을 중지했습니다. Tailscale 비공개 네트워크는 유지됩니다."

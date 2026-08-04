@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="온리 자산 API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="모아 자산 API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -198,7 +198,7 @@ def integration_status(probe: bool = False, db: Session = Depends(get_db)) -> di
 
 @app.post("/api/telegram/test", dependencies=[Depends(authorize)])
 def telegram_test(db: Session = Depends(get_db)) -> dict[str, object]:
-    message = "[온리] 텔레그램 목표가 알림 연결 테스트입니다."
+    message = "[모아] 텔레그램 목표가 알림 연결 테스트입니다."
     result = send_telegram_message(message)
     db.add(
         AlertEvent(
