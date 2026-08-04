@@ -21,6 +21,7 @@ from .models import AlertEvent, Debt, Holding
 from .news import search_company_news
 from .opendart import build_holding_report
 from .prompts import build_stock_prompts
+from .scheduler import start_auto_refresh, stop_auto_refresh
 from .state import build_state, integrations
 from .telegram import send_telegram_message
 
@@ -28,7 +29,11 @@ from .telegram import send_telegram_message
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    yield
+    scheduler_task = start_auto_refresh()
+    try:
+        yield
+    finally:
+        await stop_auto_refresh(scheduler_task)
 
 
 app = FastAPI(title="모아 자산 API", version="1.0.0", lifespan=lifespan)

@@ -14,6 +14,7 @@ from .gowalter import archive_status
 from .market import latest_exchange_rate
 from .models import AIAnalysis, AlertEvent, AssetItem, Debt, Holding, ImportBatch, PortfolioSnapshot, Transaction
 from .telegram import probe_telegram, telegram_configured
+from .scheduler import scheduler_status
 
 
 def _iso(value: datetime | date | None) -> str:
@@ -30,6 +31,7 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
         "connected": telegram_configured(),
         "message": "설정됨" if telegram_configured() else "설정 필요",
     }
+    auto_refresh = scheduler_status()
     return {
         "database": {
             "configured": True,
@@ -48,6 +50,13 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "connected": bool(last_fx),
             "message": "현재가·환율 갱신 가능" if last_fx else "첫 갱신 필요",
             "last_checked_at": _iso(last_fx.captured_at) if last_fx else "",
+        },
+        "auto_refresh": {
+            "configured": auto_refresh["enabled"],
+            "connected": auto_refresh["enabled"] and not auto_refresh["last_error"],
+            "message": f"최근 실행 실패: {auto_refresh['last_error']}" if auto_refresh["last_error"] else ("4시간 자동 갱신 대기 중" if auto_refresh["enabled"] else "자동 갱신 꺼짐"),
+            "detail": f"{auto_refresh['schedule']} · 다음 {auto_refresh['next_run'] or '계산 중'}",
+            "last_checked_at": auto_refresh["last_run"],
         },
         "openai": {
             "configured": bool(settings.openai_api_key),

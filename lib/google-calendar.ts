@@ -81,3 +81,18 @@ export async function createCalendarEvent(event: NewCalendarEvent) {
   if (!response.ok) throw new Error("Google event creation failed");
   return { configured: true, event: await response.json() };
 }
+
+export async function deleteCalendarEvent(eventId:string) {
+  const token = await accessToken();
+  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  if (!token || !calendarId) return { configured:false, deleted:false };
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+    method:"DELETE", headers:{ authorization:`Bearer ${token}` },
+  });
+  if (response.status === 404) return { configured:true, deleted:true, alreadyDeleted:true };
+  if (!response.ok) {
+    const result = await response.json().catch(()=>({})) as { error?:{ message?:string } };
+    throw new Error(result.error?.message || `Google 일정 삭제 실패 (${response.status})`);
+  }
+  return { configured:true, deleted:true };
+}

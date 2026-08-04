@@ -145,6 +145,7 @@ type CalendarEvent = {
   time?: string;
   owner: "공통" | "성근" | "지우" | "윤재";
   color?: string;
+  googleEventId?: string;
 };
 
 type CalendarConnectionStatus = {
@@ -563,7 +564,7 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   );
 }
 
-function CalendarScreen({ events, status, checking, onCheck, onAdd }: { events: CalendarEvent[]; status:CalendarConnectionStatus|null; checking:boolean; onCheck:()=>void; onAdd: (date?:string) => void }) {
+function CalendarScreen({ events, status, checking, deletingId, onCheck, onAdd, onDelete }: { events: CalendarEvent[]; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
   const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -586,7 +587,7 @@ function CalendarScreen({ events, status, checking, onCheck, onAdd }: { events: 
         return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
       })}</div></article>
       <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button></div>
-      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}</small></div><span>›</span></article>):<div className="calendar-empty">날짜를 눌러 가족 일정을 추가해 보세요.</div>}</div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div><button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button></article>):<div className="calendar-empty">날짜를 눌러 가족 일정을 추가해 보세요.</div>}</div>
       <a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>
     </section>
   );
@@ -596,6 +597,7 @@ const integrationLabels: Record<string,[string,string,string]> = {
   database:["S","SQLite 누적 저장","자산·가계부·분석·알림 이력"],
   bank_salad:["X","뱅크샐러드 업로드","가계부·자산 현황"],
   market:["↗","환율·현재가","Yahoo Finance / yfinance"],
+  auto_refresh:["↻","4시간 자동 시세 갱신","한국시간 정시 스케줄"],
   openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
   gowalter:["G","Gowalter 관점 아카이브","블로그·투자 원칙·어록"],
   opendart:["D","OpenDART 기업 리포트","공시·재무제표 기반 정형 분석"],
@@ -609,7 +611,7 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
       <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
-      <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{status.last_checked_at?` · ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
+      <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{key==="auto_refresh"&&status.detail?` · ${status.detail}`:""}{status.last_checked_at?` · 최근 ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
       <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
       <div className="privacy-note"><b>우리 가족만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
     </section>
@@ -700,6 +702,7 @@ export default function Home() {
   const [modal, setModal] = useState(false);
   const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
   const [calendarStatus,setCalendarStatus] = useState<CalendarConnectionStatus|null>(null);
+  const [deletingEventId,setDeletingEventId] = useState("");
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
   const [debtModal,setDebtModal] = useState(false);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
@@ -918,15 +921,36 @@ export default function Home() {
   }
 
   async function addEvent(event: CalendarEvent) {
+    const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
+    const result = response?.ok ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string } }|null : null;
+    const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
     setEvents((current)=>{
-      const next = [...current,event].sort((a,b)=>a.date.localeCompare(b.date));
+      const next = [...current,savedEvent].sort((a,b)=>a.date.localeCompare(b.date));
       localStorage.setItem("moa-calendar-events",JSON.stringify(next));
       return next;
     });
     setModal(false);
-    const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
-    const result = response?.ok ? await response.json().catch(()=>null) : null;
-    setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 저장했어요. Google 연동 후 자동 동기화됩니다.");
+    setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 앱에만 저장했어요. Google 연동 후 새로 등록하면 함께 저장됩니다.");
+  }
+
+  async function deleteEvent(event:CalendarEvent) {
+    if (!window.confirm(`‘${event.title}’ 일정을 삭제할까요?${event.googleEventId?" Google Calendar에서도 함께 삭제됩니다.":""}`)) return;
+    setDeletingEventId(event.id);
+    try {
+      if (event.googleEventId) {
+        const response = await fetch("/api/calendar",{method:"DELETE",headers:authHeaders(true),body:JSON.stringify({eventId:event.googleEventId})});
+        const result = await response.json().catch(()=>({}));
+        if(!response.ok || !result.deleted)throw new Error(result.error||"Google Calendar에서 일정을 삭제하지 못했습니다.");
+      }
+      setEvents((current)=>{
+        const next = current.filter((item)=>item.id!==event.id);
+        localStorage.setItem("moa-calendar-events",JSON.stringify(next));
+        return next;
+      });
+      setToast(event.googleEventId?"앱과 Google Calendar에서 일정을 삭제했어요.":"앱에서 일정을 삭제했어요.");
+    } catch(error) {
+      setToast(error instanceof Error?error.message:"일정을 삭제하지 못했습니다.");
+    } finally { setDeletingEventId(""); }
   }
 
   async function checkCalendar() {
@@ -974,7 +998,7 @@ export default function Home() {
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
         {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
-        {tab === "calendar" && <CalendarScreen events={events} status={calendarStatus} checking={busy==="calendar"} onCheck={()=>void checkCalendar()} onAdd={openEventModal} />}
+        {tab === "calendar" && <CalendarScreen events={events} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 

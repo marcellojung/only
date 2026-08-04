@@ -32,6 +32,7 @@ Windows PC를 계속 켜둘 수 있다면 Tailscale Serve가 가장 간단합니
 - `APP_ACCESS_KEY`: 가족만 아는 충분히 긴 접근 키
 - `APP_DATA_DIR`: SQLite 파일을 보관할 폴더(비우면 프로젝트의 `data`)
 - `BACKEND_URL`: Next.js가 연결할 FastAPI 내부 주소
+- `AUTO_REFRESH_ENABLED`, `AUTO_REFRESH_TIMES`: 서버 실행 중 한국시간 기준 자동 시세 갱신 여부와 시각. 기본값은 `09:00,13:00,17:00,21:00`
 - `OPENAI_API_KEY`: 선택 사항. 없으면 수치 기반 로컬 분석 사용
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 목표가 알림 연결
 - Google Calendar 관련 환경 변수 3개
@@ -48,6 +49,7 @@ SQLite 파일과 `.env.local`은 Git에서 제외됩니다. 인터넷에 공개�
 4. 웹앱을 다시 배포합니다.
 
 설정 전에도 화면과 일정 추가 흐름을 시험할 수 있으며, 연결 후 새 일정은 공유 Google Calendar에 기록됩니다.
+앱에서 추가한 Google 일정은 일정 목록의 **삭제** 버튼으로 공유 캘린더에서도 함께 삭제됩니다. 기존 로컬 일정은 앱에서만 제거됩니다.
 
 ## 카드 내역 가져오기
 

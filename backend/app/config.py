@@ -53,6 +53,8 @@ class Settings:
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "")
     google_service_account_email: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
+    auto_refresh_enabled: bool = os.getenv("AUTO_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    auto_refresh_times: str = os.getenv("AUTO_REFRESH_TIMES", "09:00,13:00,17:00,21:00")
 
     @property
     def database_url(self) -> str:
