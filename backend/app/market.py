@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 
 import yfinance as yf
@@ -95,7 +96,10 @@ def refresh_exchange_rate(db: Session) -> ExchangeRateHistory:
     history = yf.Ticker("KRW=X").history(period="5d", auto_adjust=False)
     if history.empty:
         raise ValueError("USD/KRW 환율을 가져오지 못했습니다.")
-    record = ExchangeRateHistory(rate=float(history["Close"].iloc[-1]), source="yfinance")
+    rate = float(history["Close"].iloc[-1])
+    if not math.isfinite(rate) or rate <= 0:
+        raise ValueError("USD/KRW 환율 응답이 유효하지 않습니다.")
+    record = ExchangeRateHistory(rate=rate, source="yfinance")
     db.add(record)
     db.flush()
     return record
@@ -141,7 +145,10 @@ def _latest_price(symbol: str) -> float | None:
         return None
     if history.empty:
         return None
-    return float(history["Close"].iloc[-1])
+    price = float(history["Close"].iloc[-1])
+    if not math.isfinite(price) or price <= 0:
+        return None
+    return price
 
 
 def _is_krw_symbol(symbol: str) -> bool:
