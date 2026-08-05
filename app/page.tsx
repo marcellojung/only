@@ -158,6 +158,14 @@ type CalendarConnectionStatus = {
   calendarId?:string;
 };
 
+type VersionInfo = { version:string; revision:string; started_at:string };
+
+async function requestVersionInfo() {
+  const response = await fetch("/api/version",{headers:{"x-app-key":sessionStorage.getItem("family-key")||""},cache:"no-store"});
+  if(!response.ok)throw new Error("version unavailable");
+  return await response.json() as VersionInfo;
+}
+
 type HoldingCreatePayload = {
   owner: string;
   asset_type: "주식" | "ETF" | "펀드" | "코인";
@@ -604,12 +612,28 @@ const integrationLabels: Record<string,[string,string,string]> = {
 };
 
 function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMode: boolean; integrations: IntegrationStatus; busy: string; onProbe:()=>void }) {
+  const [versionInfo,setVersionInfo] = useState<VersionInfo|null>(null);
+  const [versionError,setVersionError] = useState(false);
+  async function loadVersion() {
+    try {
+      setVersionInfo(await requestVersionInfo());
+      setVersionError(false);
+    } catch {
+      setVersionError(true);
+    }
+  }
+  useEffect(()=>{
+    let active = true;
+    void requestVersionInfo().then((info)=>{if(active)setVersionInfo(info);}).catch(()=>{if(active)setVersionError(true);});
+    return ()=>{active=false;};
+  },[]);
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
       <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
       <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{key==="auto_refresh"&&status.detail?` · ${status.detail}`:""}{status.last_checked_at?` · 최근 ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
       <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
+      <div className="settings-group"><h2>앱 정보</h2><button type="button" onClick={()=>void loadVersion()}><span className="settings-symbol version">V</span><div><b>{versionInfo?`모아 v${versionInfo.version}`:"버전 확인 중"}</b><small>{versionInfo?`실행 시작 ${new Intl.DateTimeFormat("ko-KR",{dateStyle:"short",timeStyle:"short"}).format(new Date(versionInfo.started_at))} · 눌러서 다시 확인`:versionError?"버전 정보를 확인하지 못했습니다.":"현재 실행 버전을 읽고 있습니다."}</small></div><em className={versionInfo?"connected":""}>{versionInfo?.revision||"확인 중"}</em></button></div>
       <div className="privacy-note"><b>우리 가족만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
     </section>
   );
