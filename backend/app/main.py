@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import date
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .ai import analyze_portfolio, portfolio_prompt
-from .config import settings
+from .auth import Viewer, authenticate, current_user, issue_token, require_admin
 from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
 from .importer import import_upload
 from .market import normalize_user_symbol, refresh_exchange_rate, refresh_holding_quote, refresh_market
-from .models import AlertEvent, Debt, Holding
+from .models import AlertEvent, Debt, FamilyEvent, Holding
 from .news import search_company_news
 from .opendart import build_holding_report
 from .prompts import build_stock_prompts
+from .scheduler import start_auto_refresh, stop_auto_refresh
 from .state import build_state, integrations
 from .telegram import send_telegram_message
 
@@ -28,7 +30,11 @@ from .telegram import send_telegram_message
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    yield
+    scheduler_task = start_auto_refresh()
+    try:
+        yield
+    finally:
+        await stop_auto_refresh(scheduler_task)
 
 
 app = FastAPI(title="모아 자산 API", version="1.0.0", lifespan=lifespan)
@@ -39,11 +45,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def authorize(x_app_key: str = Header(default="")) -> None:
-    if settings.access_key and x_app_key != settings.access_key:
-        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 class HoldingPatch(BaseModel):
@@ -77,18 +78,46 @@ class AnalysisPayload(BaseModel):
     prompt: str = Field(default="", max_length=16000)
 
 
+class LoginPayload(BaseModel):
+    owner: str = Field(min_length=1, max_length=30)
+    password: str = Field(min_length=1, max_length=300)
+
+
+class EventCreate(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=300)
+    date: str = Field(min_length=10, max_length=10)
+    time: str = Field(default="", max_length=20)
+    owner: str = Field(max_length=30)
+    color: str = Field(default="mint", max_length=30)
+    googleEventId: str = Field(default="", max_length=300)
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)) -> dict[str, object]:
     db.execute(text("SELECT 1"))
     return {"ok": True, "database": "sqlite", "version": app.version}
 
 
-@app.get("/api/state", dependencies=[Depends(authorize)])
-def state(db: Session = Depends(get_db)) -> dict[str, object]:
-    return build_state(db)
+@app.post("/api/auth/login")
+def login(payload: LoginPayload) -> dict[str, object]:
+    viewer = authenticate(payload.owner.strip(), payload.password)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="이름 또는 비밀번호가 맞지 않습니다.")
+    return {"token": issue_token(viewer), "viewer": {"owner": viewer.owner, "role": viewer.role}}
 
 
-@app.post("/api/import", dependencies=[Depends(authorize)])
+@app.get("/api/auth/me")
+def auth_me(viewer: Viewer = Depends(current_user)) -> dict[str, str]:
+    return {"owner": viewer.owner, "role": viewer.role}
+
+
+@app.get("/api/state")
+def state(viewer: Viewer = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
+    return build_state(db, owner=None if viewer.is_admin else viewer.owner, role=viewer.role)
+
+
+@app.post("/api/import", dependencies=[Depends(require_admin)])
 async def upload_import(
     file: UploadFile = File(...),
     owner: str = Query(default="공통", max_length=30),
@@ -107,7 +136,7 @@ async def upload_import(
         raise HTTPException(status_code=500, detail=f"파일 처리 실패: {type(exc).__name__}") from exc
 
 
-@app.post("/api/market/refresh", dependencies=[Depends(authorize)])
+@app.post("/api/market/refresh", dependencies=[Depends(require_admin)])
 def market_refresh(db: Session = Depends(get_db)) -> dict[str, object]:
     try:
         return refresh_market(db)
@@ -116,7 +145,7 @@ def market_refresh(db: Session = Depends(get_db)) -> dict[str, object]:
         raise HTTPException(status_code=502, detail=f"시세 갱신 실패: {type(exc).__name__}") from exc
 
 
-@app.post("/api/exchange-rate/refresh", dependencies=[Depends(authorize)])
+@app.post("/api/exchange-rate/refresh", dependencies=[Depends(require_admin)])
 def exchange_refresh(db: Session = Depends(get_db)) -> dict[str, object]:
     try:
         record = refresh_exchange_rate(db)
@@ -127,7 +156,7 @@ def exchange_refresh(db: Session = Depends(get_db)) -> dict[str, object]:
         raise HTTPException(status_code=502, detail=f"환율 갱신 실패: {type(exc).__name__}") from exc
 
 
-@app.post("/api/holdings", dependencies=[Depends(authorize)])
+@app.post("/api/holdings", dependencies=[Depends(require_admin)])
 def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dict[str, object]:
     supported = {"주식", "ETF", "펀드", "코인", "암호화폐"}
     if payload.asset_type not in supported:
@@ -159,7 +188,7 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
     return {"ok": True, "holding_id": holding.id, "quote_updated": quote_updated, "ticker": holding.ticker}
 
 
-@app.post("/api/debts", dependencies=[Depends(authorize)])
+@app.post("/api/debts", dependencies=[Depends(require_admin)])
 def create_debt(payload: DebtCreate, db: Session = Depends(get_db)) -> dict[str, object]:
     debt = Debt(
         owner=payload.owner.strip(),
@@ -179,7 +208,50 @@ def create_debt(payload: DebtCreate, db: Session = Depends(get_db)) -> dict[str,
     return {"ok": True, "debt_id": debt.id, "balance": debt.balance}
 
 
-@app.patch("/api/holdings/{holding_id}", dependencies=[Depends(authorize)])
+@app.post("/api/events", dependencies=[Depends(require_admin)])
+def create_event(payload: EventCreate, db: Session = Depends(get_db)) -> dict[str, object]:
+    if payload.owner not in {"공통", "성근", "지우", "윤재"}:
+        raise HTTPException(status_code=400, detail="일정 소유자를 확인해 주세요.")
+    try:
+        event_date = date.fromisoformat(payload.date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="일정 날짜를 확인해 주세요.") from exc
+    item = db.scalar(select(FamilyEvent).where(FamilyEvent.event_key == payload.id))
+    if not item:
+        item = FamilyEvent(event_key=payload.id)
+        db.add(item)
+    item.owner = payload.owner
+    item.title = payload.title.strip()
+    item.event_date = event_date
+    item.event_time = payload.time
+    item.color = payload.color
+    item.google_event_id = payload.googleEventId
+    db.commit()
+    return {
+        "ok": True,
+        "event": {
+            "id": item.event_key,
+            "title": item.title,
+            "date": item.event_date.isoformat(),
+            "time": item.event_time,
+            "owner": item.owner,
+            "color": item.color,
+            "googleEventId": item.google_event_id,
+        },
+    }
+
+
+@app.delete("/api/events/{event_key}", dependencies=[Depends(require_admin)])
+def delete_event(event_key: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    item = db.scalar(select(FamilyEvent).where(FamilyEvent.event_key == event_key))
+    if not item:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
+    db.delete(item)
+    db.commit()
+    return {"ok": True, "deleted": True}
+
+
+@app.patch("/api/holdings/{holding_id}", dependencies=[Depends(require_admin)])
 def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends(get_db)) -> dict[str, object]:
     holding = db.get(Holding, holding_id)
     if not holding or not holding.is_active:
@@ -200,10 +272,10 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
     return {"ok": True, "holding_id": holding.id}
 
 
-@app.get("/api/holdings/{holding_id}/report", dependencies=[Depends(authorize)])
-def holding_report(holding_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
+@app.get("/api/holdings/{holding_id}/report")
+def holding_report(holding_id: int, viewer: Viewer = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
     holding = db.get(Holding, holding_id)
-    if not holding or not holding.is_active:
+    if not holding or not holding.is_active or (not viewer.is_admin and holding.owner != viewer.owner):
         raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
     report = build_holding_report(holding)
     report["news"] = search_company_news(holding)
@@ -211,22 +283,22 @@ def holding_report(holding_id: int, db: Session = Depends(get_db)) -> dict[str, 
     return report
 
 
-@app.post("/api/ai/analyze", dependencies=[Depends(authorize)])
+@app.post("/api/ai/analyze", dependencies=[Depends(require_admin)])
 def ai_analysis(payload: AnalysisPayload, db: Session = Depends(get_db)) -> dict[str, object]:
     return analyze_portfolio(db, payload.prompt)
 
 
-@app.get("/api/ai/prompt", dependencies=[Depends(authorize)])
+@app.get("/api/ai/prompt", dependencies=[Depends(require_admin)])
 def ai_prompt(db: Session = Depends(get_db)) -> dict[str, object]:
     return portfolio_prompt(db)
 
 
-@app.get("/api/integrations/status", dependencies=[Depends(authorize)])
+@app.get("/api/integrations/status", dependencies=[Depends(require_admin)])
 def integration_status(probe: bool = False, db: Session = Depends(get_db)) -> dict[str, object]:
     return integrations(db, probe=probe)
 
 
-@app.post("/api/telegram/test", dependencies=[Depends(authorize)])
+@app.post("/api/telegram/test", dependencies=[Depends(require_admin)])
 def telegram_test(db: Session = Depends(get_db)) -> dict[str, object]:
     message = "[모아] 텔레그램 목표가 알림 연결 테스트입니다."
     result = send_telegram_message(message)

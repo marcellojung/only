@@ -12,8 +12,9 @@ from .config import settings
 from .history import calculate_summary
 from .gowalter import archive_status
 from .market import latest_exchange_rate
-from .models import AIAnalysis, AlertEvent, AssetItem, Debt, Holding, ImportBatch, PortfolioSnapshot, Transaction
+from .models import AIAnalysis, AlertEvent, AssetItem, Debt, FamilyEvent, Holding, ImportBatch, PortfolioSnapshot, Transaction
 from .telegram import probe_telegram, telegram_configured
+from .scheduler import scheduler_status
 
 
 def _iso(value: datetime | date | None) -> str:
@@ -30,6 +31,7 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
         "connected": telegram_configured(),
         "message": "설정됨" if telegram_configured() else "설정 필요",
     }
+    auto_refresh = scheduler_status()
     return {
         "database": {
             "configured": True,
@@ -48,6 +50,13 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "connected": bool(last_fx),
             "message": "현재가·환율 갱신 가능" if last_fx else "첫 갱신 필요",
             "last_checked_at": _iso(last_fx.captured_at) if last_fx else "",
+        },
+        "auto_refresh": {
+            "configured": auto_refresh["enabled"],
+            "connected": auto_refresh["enabled"] and not auto_refresh["last_error"],
+            "message": f"최근 실행 실패: {auto_refresh['last_error']}" if auto_refresh["last_error"] else ("4시간 자동 갱신 대기 중" if auto_refresh["enabled"] else "자동 갱신 꺼짐"),
+            "detail": f"{auto_refresh['schedule']} · 다음 {auto_refresh['next_run'] or '계산 중'}",
+            "last_checked_at": auto_refresh["last_run"],
         },
         "openai": {
             "configured": bool(settings.openai_api_key),
@@ -83,22 +92,26 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
     }
 
 
-def build_state(db: Session) -> dict[str, object]:
-    summary = calculate_summary(db)
-    latest_transaction_date = db.scalar(select(func.max(Transaction.transaction_date)))
+def build_state(db: Session, owner: str | None = None, role: str = "admin") -> dict[str, object]:
+    summary = calculate_summary(db, owner=owner)
+    latest_date_query = select(func.max(Transaction.transaction_date))
+    if owner:
+        latest_date_query = latest_date_query.where(Transaction.owner == owner)
+    latest_transaction_date = db.scalar(latest_date_query)
     if latest_transaction_date:
         month_start = latest_transaction_date.replace(day=1)
         if month_start.month == 12:
             next_month = date(month_start.year + 1, 1, 1)
         else:
             next_month = date(month_start.year, month_start.month + 1, 1)
-        monthly_spending = db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+        spending_query = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
                 Transaction.transaction_type == "지출",
                 Transaction.transaction_date >= month_start,
                 Transaction.transaction_date < next_month,
             )
-        ) or 0
+        if owner:
+            spending_query = spending_query.where(Transaction.owner == owner)
+        monthly_spending = db.scalar(spending_query) or 0
         spending_month = month_start.strftime("%Y-%m")
     else:
         monthly_spending = 0
@@ -113,34 +126,29 @@ def build_state(db: Session) -> dict[str, object]:
             "spending_month": spending_month,
         }
     )
-    holdings = list(
-        db.scalars(
-            select(Holding)
-            .where(Holding.is_active.is_(True))
-            .order_by(Holding.market_value.desc())
-        )
-    )
-    debts = list(
-        db.scalars(
-            select(Debt)
-            .where(Debt.is_active.is_(True))
-            .order_by(Debt.balance.desc())
-        )
-    )
-    transactions = list(
-        db.scalars(
-            select(Transaction)
-            .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
-            .limit(200)
-        )
-    )
+    holding_query = select(Holding).where(Holding.is_active.is_(True))
+    debt_query = select(Debt).where(Debt.is_active.is_(True))
+    transaction_query = select(Transaction)
+    event_query = select(FamilyEvent)
+    if owner:
+        holding_query = holding_query.where(Holding.owner == owner)
+        debt_query = debt_query.where(Debt.owner == owner)
+        transaction_query = transaction_query.where(Transaction.owner == owner)
+        event_query = event_query.where(FamilyEvent.owner == owner)
+    holdings = list(db.scalars(holding_query.order_by(Holding.market_value.desc())))
+    debts = list(db.scalars(debt_query.order_by(Debt.balance.desc())))
+    transactions = list(db.scalars(transaction_query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc()).limit(200)))
+    events = list(db.scalars(event_query.order_by(FamilyEvent.event_date, FamilyEvent.event_time, FamilyEvent.id)))
     snapshots = list(
         db.scalars(select(PortfolioSnapshot).order_by(PortfolioSnapshot.captured_at.desc()).limit(24))
     )
     fx = latest_exchange_rate(db)
     last_ai = db.scalar(select(AIAnalysis).order_by(AIAnalysis.created_at.desc()))
     members: dict[str, float] = {}
-    assets = list(db.scalars(select(AssetItem).where(AssetItem.is_active.is_(True))))
+    asset_query = select(AssetItem).where(AssetItem.is_active.is_(True))
+    if owner:
+        asset_query = asset_query.where(AssetItem.owner == owner)
+    assets = list(db.scalars(asset_query))
     for asset in assets:
         category = asset.category.replace(" ", "")
         if any(word in category for word in ("투자", "주식", "펀드", "증권")):
@@ -150,7 +158,8 @@ def build_state(db: Session) -> dict[str, object]:
         members[holding.owner] = members.get(holding.owner, 0) + holding.market_value
 
     return {
-        "protected": bool(settings.access_key),
+        "protected": bool(settings.admin_password or settings.access_key or settings.jiwoo_guest_password or settings.yoonjae_guest_password),
+        "viewer": {"owner": owner or "성근", "role": role},
         "updated_at": _iso(snapshots[0].captured_at) if snapshots else "",
         "summary": summary,
         "members": members,
@@ -211,6 +220,18 @@ def build_state(db: Session) -> dict[str, object]:
             }
             for item in debts
         ],
+        "events": [
+            {
+                "id": item.event_key,
+                "title": item.title,
+                "date": _iso(item.event_date),
+                "time": item.event_time,
+                "owner": item.owner,
+                "color": item.color,
+                "googleEventId": item.google_event_id,
+            }
+            for item in events
+        ],
         "history": [
             {
                 "id": item.id,
@@ -221,7 +242,7 @@ def build_state(db: Session) -> dict[str, object]:
                 "investment_value": item.investment_value,
                 "captured_at": _iso(item.captured_at),
             }
-            for item in reversed(snapshots)
+            for item in (reversed(snapshots) if not owner else [])
         ],
         "exchange_rate": {
             "pair": fx.pair if fx else "USD/KRW",
@@ -235,6 +256,6 @@ def build_state(db: Session) -> dict[str, object]:
             "provider": last_ai.provider,
             "model": last_ai.model,
             "created_at": _iso(last_ai.created_at),
-        } if last_ai else None,
-        "integrations": integrations(db),
+        } if last_ai and not owner else None,
+        "integrations": integrations(db) if not owner else {},
     }

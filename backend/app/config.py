@@ -41,6 +41,10 @@ class Settings:
     project_dir: Path = PROJECT_DIR
     data_dir: Path = _data_dir()
     access_key: str = os.getenv("APP_ACCESS_KEY", "")
+    auth_secret: str = os.getenv("AUTH_SECRET", "") or os.getenv("APP_ACCESS_KEY", "") or os.getenv("ADMIN_PASSWORD", "") or os.getenv("JIWOO_GUEST_PASSWORD", "") or os.getenv("YOONJAE_GUEST_PASSWORD", "") or "moa-local-development"
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "") or os.getenv("APP_ACCESS_KEY", "")
+    jiwoo_guest_password: str = os.getenv("JIWOO_GUEST_PASSWORD", "")
+    yoonjae_guest_password: str = os.getenv("YOONJAE_GUEST_PASSWORD", "")
     backend_url: str = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
@@ -53,6 +57,8 @@ class Settings:
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "")
     google_service_account_email: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
+    auto_refresh_enabled: bool = os.getenv("AUTO_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    auto_refresh_times: str = os.getenv("AUTO_REFRESH_TIMES", "09:00,13:00,17:00,21:00")
 
     @property
     def database_url(self) -> str:
