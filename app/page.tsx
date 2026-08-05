@@ -615,6 +615,20 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
   );
 }
 
+function QuickAddModal({ onClose, onStock, onCrypto, onDebt, onCalendar, onLedger }: { onClose:()=>void; onStock:()=>void; onCrypto:()=>void; onDebt:()=>void; onCalendar:()=>void; onLedger:()=>void }) {
+  const actions = [
+    { label:"주식 / ETF", copy:"종목과 보유 수량 직접 등록", symbol:"ST", action:onStock },
+    { label:"암호화폐", copy:"코인 수량과 원금 등록", symbol:"₿", action:onCrypto },
+    { label:"부동산 부채", copy:"주담대·전세대출 직접 등록", symbol:"₩", action:onDebt },
+    { label:"가족 일정", copy:"공용 일정과 Google Calendar", symbol:"CAL", action:onCalendar },
+    { label:"가계부 가져오기", copy:"카드·뱅크샐러드 파일 업로드", symbol:"DB", action:onLedger },
+  ];
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal quick-add-modal" onMouseDown={(event)=>event.stopPropagation()}>
+    <div className="modal-head"><div><span className="eyebrow">Quick add</span><h2>무엇을 추가할까요?</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
+    <div className="quick-add-grid">{actions.map((item)=><button type="button" key={item.label} onClick={()=>{onClose();item.action();}}><span>{item.symbol}</span><div><b>{item.label}</b><small>{item.copy}</small></div><i>›</i></button>)}</div>
+  </div></div>;
+}
+
 function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCreatePayload["asset_type"]; onClose:()=>void; onSave:(payload:HoldingCreatePayload)=>Promise<void> }) {
   const [assetType,setAssetType] = useState<HoldingCreatePayload["asset_type"]>(initialType);
   const [saving,setSaving] = useState(false);
@@ -703,6 +717,7 @@ export default function Home() {
   const [deletingEventId,setDeletingEventId] = useState("");
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
   const [debtModal,setDebtModal] = useState(false);
+  const [quickAddModal,setQuickAddModal] = useState(false);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [protectedMode, setProtectedMode] = useState(false);
@@ -1006,6 +1021,14 @@ export default function Home() {
     setModal(true);
   }
 
+  function openQuickAdd() {
+    if (tab === "stocks") return openAssetModal("주식");
+    if (tab === "crypto") return openAssetModal("코인");
+    if (tab === "realestate") return setDebtModal(true);
+    if (tab === "calendar") return openEventModal();
+    setQuickAddModal(true);
+  }
+
   if (locked) {
     return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>내 계정을 선택하고 가족 비밀번호로 로그인해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault();try{await login()}catch(error){setToast(error instanceof Error?error.message:"로그인하지 못했습니다.")}}}><label className="login-label">계정<select value={loginOwner} onChange={(event)=>setLoginOwner(event.target.value as typeof loginOwner)}><option>성근</option><option>지우</option><option>윤재</option></select></label><label className="login-label">비밀번호<input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="비밀번호" autoComplete="current-password" required/></label><button className="primary-button full">로그인</button></form><small className="login-role-note">성근 · 관리자 / 지우·윤재 · 본인 자산 조회</small></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
   }
@@ -1041,13 +1064,14 @@ export default function Home() {
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 
-      {isAdmin&&<button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? openEventModal() : setTab("ledger")}><Icon name="plus" /></button>}
+      {isAdmin&&<button className="fab" aria-label="빠른 추가" onClick={openQuickAdd}><Icon name="plus" /></button>}
       <nav className="bottom-nav" aria-label="주요 메뉴" style={{gridTemplateColumns:`repeat(${bottomItems.length},1fr)`}}>
         {bottomItems.map((item)=><button key={item.id} className={tab===item.id || (item.id==="stocks" && ["family","crypto","realestate"].includes(tab))?"active":""} onClick={()=>setTab(item.id as TabId)}><Icon name={item.icon}/><small>{item.label}</small></button>)}
       </nav>
       <div className="sr-only" aria-live="polite">현재 화면: {activeTitle}</div>
       {toast && <div className="toast" role="status">{toast}</div>}
       {modal && <EventModal initialDate={eventDate} onClose={()=>setModal(false)} onSave={addEvent} />}
+      {quickAddModal&&<QuickAddModal onClose={()=>setQuickAddModal(false)} onStock={()=>openAssetModal("주식")} onCrypto={()=>openAssetModal("코인")} onDebt={()=>setDebtModal(true)} onCalendar={()=>openEventModal()} onLedger={()=>setTab("ledger")}/>}
       {assetModalType&&<AssetModal initialType={assetModalType} onClose={()=>setAssetModalType(null)} onSave={createAsset}/>}
       {debtModal&&<DebtModal onClose={()=>setDebtModal(false)} onSave={createDebt}/>}
       {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
