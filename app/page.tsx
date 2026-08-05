@@ -63,6 +63,7 @@ type HoldingData = {
   target_price: number;
   target_alert_enabled: boolean;
   target_alert_sent_at: string;
+  average_price_krw?: number;
 };
 
 type AssetSummary = {
@@ -174,6 +175,8 @@ type HoldingCreatePayload = {
   ticker: string;
   quantity: number;
   principal: number;
+  average_price: number;
+  average_price_currency: "KRW" | "USD";
 };
 
 type DebtData = {
@@ -375,6 +378,8 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
+  const [quantity, setQuantity] = useState(item.quantity ? String(item.quantity) : "");
+  const [averagePrice, setAveragePrice] = useState(item.quantity ? String(item.principal/item.quantity) : "");
   const estimated = item.quantity_source === "estimated_from_import_value";
   const profit = item.market_value-item.principal;
   const returnPercent = item.return_rate*100;
@@ -391,7 +396,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
     </button>
     <div className="holding-infographic">
       <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={masked}>{compactMoney(item.market_value)}</Amount></strong></div>
-      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong></div>
+      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong><small><Amount hidden={masked}>{item.quantity?`원화 평단 ${money(item.principal/item.quantity)}원`:"평단 입력 필요"}</Amount></small></div>
       <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={masked}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
       <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={masked}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
       <div className="return-visual" aria-label={`${item.name} 수익률 ${returnPercent.toFixed(1)}퍼센트`}>
@@ -400,8 +405,10 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
       </div>
       <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button>{!readOnly&&<b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b>}</div>
     </div>
-    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
+    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,quantity:Number(quantity),average_price_krw:Number(averagePrice),target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
+      <label>보유 수량<input type="number" min="0.00000001" step="any" value={quantity} onChange={(event)=>setQuantity(event.target.value)} placeholder="10" required/></label>
+      <label>원화 환산 평단<input type="number" min="0.00000001" step="any" value={averagePrice} onChange={(event)=>setAveragePrice(event.target.value)} placeholder="평균 매입가" required/></label>
       <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
       <button className="primary-button small">저장</button>
       <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
@@ -655,6 +662,7 @@ function QuickAddModal({ onClose, onStock, onCrypto, onDebt, onCalendar, onLedge
 
 function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCreatePayload["asset_type"]; onClose:()=>void; onSave:(payload:HoldingCreatePayload)=>Promise<void> }) {
   const [assetType,setAssetType] = useState<HoldingCreatePayload["asset_type"]>(initialType);
+  const [averageCurrency,setAverageCurrency] = useState<"KRW"|"USD">("KRW");
   const [saving,setSaving] = useState(false);
   const cryptoPresets = [{name:"비트코인",ticker:"BTC"},{name:"이더리움",ticker:"ETH"},{name:"리플",ticker:"XRP"},{name:"솔라나",ticker:"SOL"}];
   async function submit(event:FormEvent<HTMLFormElement>) {
@@ -665,18 +673,21 @@ function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCrea
       await onSave({
         owner:String(form.get("owner")), asset_type:assetType, broker:String(form.get("broker")),
         name:String(form.get("name")), ticker:String(form.get("ticker")),
-        quantity:Number(form.get("quantity")), principal:Number(form.get("principal")) || 0,
+        quantity:Number(form.get("quantity")), principal:0,
+        average_price:Number(form.get("average_price")), average_price_currency:averageCurrency,
       });
     } finally { setSaving(false); }
   }
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal asset-modal" onMouseDown={(event)=>event.stopPropagation()}>
     <div className="modal-head"><div><span className="eyebrow">직접 등록</span><h2>자산 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
     <form onSubmit={submit}>
-      <div className="form-row"><label>자산 유형<select value={assetType} onChange={(event)=>setAssetType(event.target.value as HoldingCreatePayload["asset_type"])}><option>주식</option><option>ETF</option><option>펀드</option><option>코인</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
+      <div className="form-row"><label>자산 유형<select value={assetType} onChange={(event)=>{const next=event.target.value as HoldingCreatePayload["asset_type"];setAssetType(next);if(next==="코인")setAverageCurrency("KRW");}}><option>주식</option><option>ETF</option><option>펀드</option><option>코인</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
       {assetType==="코인"&&<div className="asset-presets">{cryptoPresets.map((coin)=><button key={coin.ticker} type="button" onClick={(event)=>{const form=event.currentTarget.closest("form");const name=form?.elements.namedItem("name") as HTMLInputElement|null;const ticker=form?.elements.namedItem("ticker") as HTMLInputElement|null;if(name)name.value=coin.name;if(ticker)ticker.value=coin.ticker;}}>{coin.ticker}</button>)}</div>}
       <label>자산 이름<input name="name" placeholder={assetType==="코인"?"예: 비트코인":"예: 삼성전자"} required autoFocus /></label>
       <div className="form-row"><label>티커·심볼<input name="ticker" placeholder={assetType==="코인"?"BTC":"005930.KS / AAPL"} required={assetType!=="펀드"} /></label><label>금융사·거래소<input name="broker" defaultValue={assetType==="코인"?"직접 입력":"직접 입력"} /></label></div>
-      <div className="form-row"><label>보유 수량<input name="quantity" type="number" min="0" step="any" placeholder="0.1" required /></label><label>투자 원금(원)<input name="principal" type="number" min="0" step="1" placeholder="선택 입력" /></label></div>
+      <div className="form-row"><label>보유 수량<input name="quantity" type="number" min="0.00000001" step="any" placeholder="0.1" required /></label><label>평균 매입가<input name="average_price" type="number" min="0.00000001" step="any" placeholder={averageCurrency==="USD"?"예: 180.50":"예: 95000"} required /></label></div>
+      <label>평단 통화<select value={averageCurrency} onChange={(event)=>setAverageCurrency(event.target.value as "KRW"|"USD")}><option value="KRW">원화 (KRW)</option>{assetType!=="코인"&&<option value="USD">달러 (USD)</option>}</select></label>
+      <p className="form-hint">보유 수량 × 평균 매입가로 투자 원금을 자동 계산합니다.{averageCurrency==="USD"?" 현재 USD/KRW 환율로 원화 환산합니다.":""}</p>
       {assetType==="코인"&&<p className="form-hint">심볼은 자동으로 BTC-KRW 같은 원화 시세 페어로 저장됩니다.</p>}
       <button className="primary-button full" disabled={saving}>{saving?"등록 중…":"자산 등록"}</button>
     </form>

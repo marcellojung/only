@@ -72,3 +72,30 @@ def test_create_crypto_holding_keeps_krw_pair(monkeypatch) -> None:
         holding = db.scalar(select(Holding))
         assert result["ticker"] == "BTC-KRW"
         assert holding is not None and holding.source_key.startswith("manual:")
+
+
+def test_create_us_stock_converts_average_price_to_krw(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr("backend.app.main.refresh_holding_quote", lambda _db, _holding: False)
+    monkeypatch.setattr("backend.app.main.create_portfolio_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("backend.app.main.latest_exchange_rate", lambda _db: type("Rate", (), {"rate": 1400.0})())
+    with Session(engine) as db:
+        create_holding(
+            HoldingCreate(
+                owner="성근",
+                asset_type="주식",
+                name="Apple",
+                ticker="AAPL",
+                quantity=2,
+                average_price=100,
+                average_price_currency="USD",
+            ),
+            db,
+        )
+        holding = db.scalar(select(Holding))
+        assert holding is not None and holding.principal == 280_000

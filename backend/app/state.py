@@ -191,6 +191,7 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
                 "ticker_source": item.ticker_source,
                 "currency": item.currency,
                 "principal": item.principal,
+                "average_price_krw": item.principal / item.quantity if item.quantity else 0,
                 "market_value": item.market_value,
                 "return_rate": item.return_rate,
                 "quantity": item.quantity,
