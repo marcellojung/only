@@ -61,6 +61,63 @@ pnpm build
 
 `data/family-assets.db`에는 모든 가계부·자산·분석 이력이 들어 있습니다. 앱을 중지한 상태에서 이 파일을 주기적으로 외장 디스크나 개인 클라우드에 복사하세요.
 
+## Node 또는 pnpm을 찾지 못할 때
+
+`node --version`, `npm.cmd`, `pnpm.cmd`를 찾지 못하거나 아래 오류가 나오면 Node 설치 폴더가 Windows `PATH`에 등록되지 않은 상태입니다.
+
+```text
+'"node"'은(는) 내부 또는 외부 명령이 아닙니다.
+Cannot find module 'C:\only\pnpm'
+```
+
+`node.exe pnpm build` 또는 `node.exe npm.cmd`처럼 실행하면 Node가 `pnpm`이나 `npm.cmd`를 JavaScript 파일로 해석하므로 사용하지 않습니다. `node.exe`는 `scripts/setup-backend.mjs` 같은 JavaScript 파일을 실행할 때만 붙입니다.
+
+먼저 npm 설치 여부를 확인합니다.
+
+```powershell
+Test-Path "C:\Program Files\nodejs\npm.cmd"
+```
+
+결과가 `True`이면 현재 PowerShell에 Node와 npm 전역 경로를 등록하고 프로젝트에서 고정한 pnpm 버전을 설치합니다.
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" install --global pnpm@10.17.1
+
+$npmPrefix = & "C:\Program Files\nodejs\npm.cmd" prefix --global
+$pnpmPath = Join-Path $npmPrefix "pnpm.cmd"
+$env:Path = "C:\Program Files\nodejs;$npmPrefix;$env:Path"
+
+node --version
+& $pnpmPath --version
+```
+
+Node는 설치된 버전, pnpm은 `10.17.1`이 표시되어야 합니다. 이어서 아래처럼 업데이트합니다.
+
+```powershell
+cd C:\only
+
+& $pnpmPath install --frozen-lockfile
+node scripts/setup-backend.mjs
+& $pnpmPath build
+
+.\scripts\windows-stop.ps1
+.\scripts\windows-start.ps1
+```
+
+새 PowerShell이나 재부팅 후에도 명령을 찾을 수 있도록 Windows의 **환경 변수 편집 → 사용자 변수 → Path**에 다음 두 경로를 추가합니다. `본인계정`은 실제 Windows 사용자 폴더명으로 바꿉니다.
+
+```text
+C:\Program Files\nodejs
+C:\Users\본인계정\AppData\Roaming\npm
+```
+
+저장한 뒤 PowerShell을 완전히 닫았다가 다시 열어 확인합니다.
+
+```powershell
+node --version
+pnpm --version
+```
+
 ## 보안 원칙
 
 - 공유기에서 3000번이나 8000번 포트를 개방하지 않습니다.
