@@ -111,6 +111,20 @@ class Debt(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class FamilyEvent(Base):
+    __tablename__ = "family_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner: Mapped[str] = mapped_column(String(30), index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    event_date: Mapped[date] = mapped_column(Date, index=True)
+    event_time: Mapped[str] = mapped_column(String(20), default="")
+    color: Mapped[str] = mapped_column(String(30), default="mint")
+    google_event_id: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshots"
 

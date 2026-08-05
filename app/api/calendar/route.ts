@@ -1,15 +1,19 @@
 import { checkCalendarConnection, createCalendarEvent, deleteCalendarEvent } from "../../../lib/google-calendar";
-import { isAuthorized } from "../../../lib/store";
+import { backendViewer } from "../../../lib/backend-auth";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  if (!isAuthorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const viewer = await backendViewer(request);
+  if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });
   return Response.json(await checkCalendarConnection());
 }
 
 export async function POST(request: Request) {
-  if (!isAuthorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const viewer = await backendViewer(request);
+  if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.title || !body.date) return Response.json({ error: "title and date are required" }, { status: 400 });
@@ -21,7 +25,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!isAuthorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const viewer = await backendViewer(request);
+  if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.eventId) return Response.json({ error: "eventId is required" }, { status: 400 });

@@ -118,6 +118,7 @@ type StockReport = {
 
 type ServerState = {
   protected: boolean;
+  viewer: { owner:"성근"|"지우"|"윤재"; role:"admin"|"guest" };
   updated_at: string;
   summary: AssetSummary;
   members: Record<string, number>;
@@ -132,6 +133,7 @@ type ServerState = {
   }>;
   holdings: HoldingData[];
   debts: DebtData[];
+  events: CalendarEvent[];
   history: Array<{ id: number; source: string; total_assets: number; total_debts: number; net_assets: number; investment_value: number; captured_at: string }>;
   exchange_rate: { pair: string; rate: number; source: string; updated_at: string };
   latest_analysis: { id: number; text: string; provider: string; model: string; created_at: string } | null;
@@ -222,15 +224,6 @@ const initialPortfolio: Portfolio = {
   other: 0,
 };
 
-const sampleEvents: CalendarEvent[] = [
-  { id: "e1", title: "아파트 관리비", date: "2026-08-05", time: "자동이체", owner: "공통", color: "mint" },
-  { id: "e2", title: "지우 치과", date: "2026-08-08", time: "11:30", owner: "지우", color: "pink" },
-  { id: "e3", title: "포트폴리오 점검", date: "2026-08-12", time: "20:00", owner: "공통", color: "violet" },
-  { id: "e4", title: "부모님 저녁", date: "2026-08-16", time: "18:00", owner: "공통", color: "amber" },
-  { id: "e5", title: "성근 건강검진", date: "2026-08-21", time: "09:00", owner: "성근", color: "blue" },
-  { id: "e6", title: "윤재 일정", date: "2026-08-24", time: "16:00", owner: "윤재", color: "amber" },
-];
-
 const money = (value: number) => new Intl.NumberFormat("ko-KR").format(value);
 const compactMoney = (value: number) => {
   if (value >= 100000000) {
@@ -273,7 +266,7 @@ function ScreenHeading({ eyebrow, title, copy }: { eyebrow: string; title: strin
   );
 }
 
-function Summary({ hidden, hiddenRealEstate, setTab, portfolio, transactions, onImport, importStatus, importing }: { hidden: boolean; hiddenRealEstate: boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null, owner?: string) => void; importStatus: ImportStatus | null; importing: boolean }) {
+function Summary({ hidden, hiddenRealEstate, readOnly, setTab, portfolio, transactions, onImport, importStatus, importing }: { hidden: boolean; hiddenRealEstate: boolean; readOnly:boolean; setTab: (tab: TabId) => void; portfolio: Portfolio; transactions: Transaction[]; onImport: (files: FileList | null, owner?: string) => void; importStatus: ImportStatus | null; importing: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [importOwner,setImportOwner] = useState("성근");
   const expenses = transactions.filter((item) => item.kind === "expense");
@@ -293,7 +286,8 @@ function Summary({ hidden, hiddenRealEstate, setTab, portfolio, transactions, on
   ];
   return (
     <section className="screen fade-in" aria-label="자산 요약">
-      <div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>
+      {!readOnly&&<div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>}
+      {readOnly&&<div className="guest-notice">게스트 모드 · 내 자산만 조회할 수 있어요.</div>}
       {importStatus && <div className="import-status" role="status"><b>✓ 업데이트 완료</b><span>{importStatus.label} · {new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(importStatus.importedAt))}</span><small>가계부 {money(importStatus.transactionCount)}건 · 투자상품 {money(importStatus.holdingCount)}개</small></div>}
       <div className="hero-card">
         <div className="hero-orb" />
@@ -309,7 +303,7 @@ function Summary({ hidden, hiddenRealEstate, setTab, portfolio, transactions, on
 
       <div className="section-title-row">
         <div><span className="eyebrow">한눈에 보기</span><h2>자산 흐름</h2></div>
-        <button className="text-button" onClick={() => setTab("family")}>가족별 보기 →</button>
+        {!readOnly&&<button className="text-button" onClick={() => setTab("family")}>가족별 보기 →</button>}
       </div>
 
       <div className="metric-grid">
@@ -369,7 +363,7 @@ function Family({ hidden, portfolio, members }: { hidden: boolean; portfolio: Po
   );
 }
 
-function HoldingCard({ item, index, totalValue, hidden, assetHidden, onToggleHidden, onSave, onOpenReport }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; assetHidden: boolean; onToggleHidden:()=>void; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
+function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, onToggleHidden, onSave, onOpenReport }: { item: HoldingData; index: number; totalValue: number; hidden: boolean; assetHidden: boolean; readOnly:boolean; onToggleHidden:()=>void; onSave: (id: number, data: Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
@@ -381,7 +375,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, onToggleHid
   const trendClass = returnPercent>0?"gain":returnPercent<0?"loss":"flat";
   const masked = hidden || assetHidden;
   return <article className={`holding-card ${trendClass} ${index<3?"top-holding":""} ${assetHidden?"asset-is-hidden":""}`}>
-    <button className="holding-main" aria-expanded={editing} onClick={()=>setEditing(!editing)}>
+    <button className="holding-main" aria-expanded={readOnly?undefined:editing} onClick={()=>!readOnly&&setEditing(!editing)}>
       <span className="holding-rank">{String(index+1).padStart(2,"0")}</span>
       <span className="asset-logo">{item.name.slice(0,1)}</span>
       <div className="holding-identity"><b>{item.name}</b><small><em>{item.broker||"금융사 미지정"}</em><em>{item.owner}</em><em>{item.ticker||"티커 확인 전"}</em></small></div>
@@ -396,9 +390,9 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, onToggleHid
         <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}><Amount hidden={masked}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</Amount></b><span>수익</span></div>
         <div className="return-track"><i className="zero-line"/><i className="return-marker" style={{left:`${meterPosition}%`}}/><span className="loss-zone"/><span className="gain-zone"/></div>
       </div>
-      <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button><b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b></div>
+      <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button>{!readOnly&&<b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b>}</div>
     </div>
-    {editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
+    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
       <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
       <button className="primary-button small">저장</button>
@@ -443,8 +437,9 @@ function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: Gowa
   </article>;
 }
 
-function Stocks({ hidden, holdings, hiddenAssetKeys, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport, onToggleAssetHidden, onAdd }: { hidden: boolean; holdings: HoldingData[]; hiddenAssetKeys: string[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void; onToggleAssetHidden:(key:string,label:string)=>void; onAdd:()=>void }) {
+function Stocks({ hidden, readOnly, ownerFilter, onOwnerFilter, holdings, hiddenAssetKeys, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport, onToggleAssetHidden, onAdd }: { hidden: boolean; readOnly:boolean; ownerFilter:string; onOwnerFilter:(owner:string)=>void; holdings: HoldingData[]; hiddenAssetKeys: string[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null,owner:string)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void; onToggleAssetHidden:(key:string,label:string)=>void; onAdd:()=>void }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [importOwner,setImportOwner] = useState("성근");
   const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
   const value = summary?.investment_value || holdings.reduce((sum,item)=>sum+item.market_value,0);
   const pnl = value-principal;
@@ -470,9 +465,10 @@ function Stocks({ hidden, holdings, hiddenAssetKeys, summary, exchangeRate, anal
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="주식 / ETF" title="꾸준히, 멀리 보기" copy="뱅크샐러드 종목을 현재 시세와 목표가 알림까지 연결해요." />
-      <div className="upload-row stock-upload"><button className="primary-button" disabled={Boolean(busy)} onClick={()=>inputRef.current?.click()}>{busy==="import"?"파일 반영 중…":"＋ 뱅크샐러드·종목 파일"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{onImport(event.target.files);event.target.value=""}}/><span>같은 내역은 자동 중복 제외</span></div>
+      {!readOnly&&<div className="owner-filter" aria-label="소유자별 종목 필터">{["전체","성근","지우","윤재","공통"].map((owner)=><button type="button" key={owner} className={ownerFilter===owner?"active":""} onClick={()=>onOwnerFilter(owner)}>{owner}</button>)}</div>}
+      {!readOnly&&<div className="upload-row stock-upload"><select className="owner-select" aria-label="종목 파일 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select><button className="primary-button" disabled={Boolean(busy)} onClick={()=>inputRef.current?.click()}>{busy==="import"?"파일 반영 중…":"＋ 뱅크샐러드·종목 파일"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{onImport(event.target.files,importOwner);event.target.value=""}}/><span>선택한 가족의 종목으로 저장</span></div>}
       <article className="investment-hero stock-hero"><span>투자 원금 {compactMoney(principal)}</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={pnl<0?"negative":""}>{pnl>=0?"+":""}{compactMoney(pnl)} ({principal?(pnl/principal*100).toFixed(1):0}%)</strong><div className="spark-bars">{[30,42,36,49,55,51,68,73,69,81,88,96].map((v,i)=><i key={i} style={{height:`${v}%`}} />)}</div></article>
-      <div className="market-actions"><div><span className="eyebrow">환율</span><b>{exchangeRate?.rate?`1 USD = ${money(exchangeRate.rate)}원`:"갱신 전"}</b></div><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 환율·현재가 갱신"}</button><button className="filter-button" disabled={Boolean(busy)} onClick={()=>void onAnalyze()}>{busy==="ai"?"분석 중…":"Gowalter AI 분석"}</button></div>
+      <div className="market-actions"><div><span className="eyebrow">환율</span><b>{exchangeRate?.rate?`1 USD = ${money(exchangeRate.rate)}원`:"갱신 전"}</b></div>{!readOnly&&<><button className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 환율·현재가 갱신"}</button><button className="filter-button" disabled={Boolean(busy)} onClick={()=>void onAnalyze()}>{busy==="ai"?"분석 중…":"Gowalter AI 분석"}</button></>}</div>
       {holdings.length>0&&<article className="panel portfolio-allocation">
         <div className="panel-head"><div><span className="eyebrow">전체 종목 비중</span><h2>포트폴리오 한눈에 보기</h2></div><span className="allocation-total-chip">합계 100%</span></div>
         <div className="allocation-overview">
@@ -496,28 +492,28 @@ function Stocks({ hidden, holdings, hiddenAssetKeys, summary, exchangeRate, anal
         </div>
         {holdings.length>6&&<p className="allocation-note">가독성을 위해 평가액 상위 6개 종목을 표시하고, 나머지 {holdings.length-6}개 종목은 기타로 합쳤어요.</p>}
       </article>}
-      {analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
-      {promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>}
-      <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div><button className="primary-button small" onClick={onAdd}>＋ 자산 추가</button></div>
-      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">뱅크샐러드 파일을 올리거나 자산을 직접 추가해 주세요.</article>}</div>
+      {!readOnly&&analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
+      {!readOnly&&(promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>)}
+      <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div>{!readOnly&&<button className="primary-button small" onClick={onAdd}>＋ 자산 추가</button>}</div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} readOnly={readOnly} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">{readOnly?"내 이름으로 등록된 투자자산이 없습니다.":"뱅크샐러드 파일을 올리거나 자산을 직접 추가해 주세요."}</article>}</div>
     </section>
   );
 }
 
-function Crypto({ hidden, holdings, hiddenAssetKeys, busy, onRefresh, onAdd, onToggleAssetHidden, onSave, onOpenReport }: { hidden: boolean; holdings: HoldingData[]; hiddenAssetKeys:string[]; busy:string; onRefresh:()=>void; onAdd:()=>void; onToggleAssetHidden:(key:string,label:string)=>void; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
+function Crypto({ hidden, readOnly, holdings, hiddenAssetKeys, busy, onRefresh, onAdd, onToggleAssetHidden, onSave, onOpenReport }: { hidden: boolean; readOnly:boolean; holdings: HoldingData[]; hiddenAssetKeys:string[]; busy:string; onRefresh:()=>void; onAdd:()=>void; onToggleAssetHidden:(key:string,label:string)=>void; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void }) {
   const value = holdings.reduce((sum,item)=>sum+item.market_value,0);
   const principal = holdings.reduce((sum,item)=>sum+item.principal,0);
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="암호화폐" title="코인도 원화로 한눈에" copy="거래소와 별개로 수량을 등록하면 원화 시세와 평가금액을 갱신해요." />
       <article className="investment-hero crypto-hero"><span>암호화폐 평가금액</span><h2><Amount hidden={hidden}>{compactMoney(value)}</Amount></h2><strong className={value-principal<0?"negative":""}>{value-principal>=0?"+":""}{compactMoney(value-principal)}</strong><div className="crypto-rings"><i /><i /><i /></div></article>
-      <div className="market-actions crypto-actions"><div><span className="eyebrow">KRW 시세</span><b>Yahoo Finance 원화 페어</b></div><button type="button" className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 원화 시세 갱신"}</button><button type="button" className="filter-button crypto-add-button" onClick={onAdd}>＋ 암호화폐 추가</button></div>
-      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={value} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card crypto-empty">비트코인, 이더리움 등 보유 코인을 직접 추가해 주세요.<button type="button" className="primary-button small" onClick={onAdd}>첫 암호화폐 추가</button></article>}</div>
+      <div className="market-actions crypto-actions"><div><span className="eyebrow">KRW 시세</span><b>Yahoo Finance 원화 페어</b></div>{!readOnly&&<><button type="button" className="primary-button" disabled={Boolean(busy)} onClick={onRefresh}>{busy==="market"?"갱신 중…":"↻ 원화 시세 갱신"}</button><button type="button" className="filter-button crypto-add-button" onClick={onAdd}>＋ 암호화폐 추가</button></>}</div>
+      <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={value} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} readOnly={readOnly} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card crypto-empty">{readOnly?"내 이름으로 등록된 암호화폐가 없습니다.":"비트코인, 이더리움 등 보유 코인을 직접 추가해 주세요."}{!readOnly&&<button type="button" className="primary-button small" onClick={onAdd}>첫 암호화폐 추가</button>}</article>}</div>
     </section>
   );
 }
 
-function RealEstate({ hidden, assetHidden, onToggleHidden, onAddDebt, portfolio, debts }: { hidden: boolean; assetHidden:boolean; onToggleHidden:()=>void; onAddDebt:()=>void; portfolio: Portfolio; debts:DebtData[] }) {
+function RealEstate({ hidden, readOnly, assetHidden, onToggleHidden, onAddDebt, portfolio, debts }: { hidden: boolean; readOnly:boolean; assetHidden:boolean; onToggleHidden:()=>void; onAddDebt:()=>void; portfolio: Portfolio; debts:DebtData[] }) {
   const equity = Math.max(0, portfolio.realEstate - portfolio.totalDebts);
   const debtRatio = percentage(portfolio.totalDebts, portfolio.realEstate);
   return (
@@ -527,7 +523,7 @@ function RealEstate({ hidden, assetHidden, onToggleHidden, onAddDebt, portfolio,
       <article className="property-card"><div className="property-visual"><span>REAL ESTATE</span><div className="building"><i/><i/><i/><i/><i/><i/></div></div><div className="property-content"><span className="status-pill">뱅크샐러드</span><h2>등록 부동산</h2><p>{portfolio.asOf || "업데이트 전"} 평가 기준</p><div className="property-price"><span>현재 평가금액</span><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></strong><small>원본 파일의 재무현황 합계</small></div></div></article>
       <div className="metric-grid property-metrics"><article className="metric-card"><p>총 부채</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></strong><small>자산현황에 연결된 부채</small></article><article className="metric-card"><p>부동산 순가치</p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(equity)}</Amount></strong><small>부채비율 {debtRatio.toFixed(1)}%</small></article></div>
       <article className="panel loan-panel"><div className="panel-head"><div><span className="eyebrow">부채 비율</span><h2>부동산 대비</h2></div><strong><Amount hidden={assetHidden}>{debtRatio.toFixed(1)}%</Amount></strong></div><div className="progress"><i style={{width:`${Math.min(debtRatio,100)}%`}} /></div><div className="loan-stats"><span>부동산 평가액 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.realEstate)}</Amount></b></span><span>총 부채 <b><Amount hidden={hidden || assetHidden}>{compactMoney(portfolio.totalDebts)}</Amount></b></span></div></article>
-      <div className="section-title-row"><div><span className="eyebrow">등록 대출 {debts.length}건</span><h2>부동산 부채</h2></div><button className="primary-button small" onClick={onAddDebt}>＋ 부채 추가</button></div>
+      <div className="section-title-row"><div><span className="eyebrow">등록 대출 {debts.length}건</span><h2>부동산 부채</h2></div>{!readOnly&&<button className="primary-button small" onClick={onAddDebt}>＋ 부채 추가</button>}</div>
       <div className="debt-list">{debts.length?debts.map((debt)=><article className="debt-row" key={debt.id}><span className="debt-symbol">₩</span><div><b>{debt.name}</b><small>{debt.provider||"금융사 미지정"} · {debt.owner} · {debt.debt_type}</small></div><p><strong><Amount hidden={hidden || assetHidden}>{compactMoney(debt.balance)}</Amount></strong><small>{debt.interest_rate?`연 ${debt.interest_rate.toFixed(2)}%`:"금리 미입력"}{debt.manual?" · 직접 등록":" · 뱅크샐러드"}</small></p></article>):<article className="empty-card">뱅크샐러드에 없는 주담대·전세대출을 직접 추가할 수 있어요.</article>}</div>
     </section>
   );
@@ -564,7 +560,7 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
   );
 }
 
-function CalendarScreen({ events, status, checking, deletingId, onCheck, onAdd, onDelete }: { events: CalendarEvent[]; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
+function CalendarScreen({ events, readOnly, status, checking, deletingId, onCheck, onAdd, onDelete }: { events: CalendarEvent[]; readOnly:boolean; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
   const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -575,20 +571,21 @@ function CalendarScreen({ events, status, checking, deletingId, onCheck, onAdd, 
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="Google Calendar" title="우리의 공동 일정" copy="서로 추가한 일정이 Google 캘린더와 함께 업데이트돼요." />
-      <article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
+      {!readOnly&&<article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
         <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button>
-      </article>
+      </article>}
+      {readOnly&&<div className="guest-notice">게스트 모드 · 내 이름으로 등록된 일정만 표시합니다.</div>}
       <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
         const dayEvents = monthEvents.filter((item)=>item.date===dateKey);
         const today = new Date();
         const isToday = year===today.getFullYear() && month===today.getMonth() && day===today.getDate();
-        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
+        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" disabled={readOnly} onClick={()=>onAdd(dateKey)} aria-label={readOnly?dateKey:`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
       })}</div></article>
-      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div><button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button></div>
-      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div><button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button></article>):<div className="calendar-empty">날짜를 눌러 가족 일정을 추가해 보세요.</div>}</div>
-      <a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>
+      <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div>{!readOnly&&<button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button>}</div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">{readOnly?"등록된 내 일정이 없습니다.":"날짜를 눌러 가족 일정을 추가해 보세요."}</div>}</div>
+      {!readOnly&&<a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>}
     </section>
   );
 }
@@ -698,18 +695,20 @@ export default function Home() {
   const [serverState, setServerState] = useState<ServerState | null>(null);
   const [gowalterPrompt, setGowalterPrompt] = useState<GowalterPrompt | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>(sampleEvents);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [modal, setModal] = useState(false);
   const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
   const [calendarStatus,setCalendarStatus] = useState<CalendarConnectionStatus|null>(null);
+  const [stockOwnerFilter,setStockOwnerFilter] = useState("전체");
   const [deletingEventId,setDeletingEventId] = useState("");
   const [assetModalType,setAssetModalType] = useState<HoldingCreatePayload["asset_type"]|null>(null);
   const [debtModal,setDebtModal] = useState(false);
   const [hiddenAssetKeys,setHiddenAssetKeys] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [protectedMode, setProtectedMode] = useState(false);
-  const [locked, setLocked] = useState(false);
+  const [locked, setLocked] = useState(true);
   const [accessKey, setAccessKey] = useState("");
+  const [loginOwner,setLoginOwner] = useState<"성근"|"지우"|"윤재">("성근");
   const [busy, setBusy] = useState("");
   const [reportItem,setReportItem] = useState<HoldingData|null>(null);
   const [stockReport,setStockReport] = useState<StockReport|null>(null);
@@ -725,13 +724,6 @@ export default function Home() {
         window.setTimeout(()=>setHiddenAssetKeys(parsed),0);
       } catch { localStorage.removeItem("moa-hidden-assets"); }
     }
-    const savedEvents = localStorage.getItem("moa-calendar-events");
-    if (savedEvents) {
-      try {
-        const parsed = JSON.parse(savedEvents) as CalendarEvent[];
-        window.setTimeout(()=>setEvents(parsed),0);
-      } catch { localStorage.removeItem("moa-calendar-events"); }
-    }
     // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
   }, []);
@@ -744,16 +736,39 @@ export default function Home() {
 
   const activeTitle = useMemo(() => navItems.find((item)=>item.id===tab)?.label, [tab]);
 
+  async function migrateStoredEvents(key:string, state:ServerState) {
+    const saved = localStorage.getItem("moa-calendar-events");
+    if (!saved || state.viewer.role !== "admin") return state.events;
+    try {
+      const localEvents = JSON.parse(saved) as CalendarEvent[];
+      const merged = [...state.events];
+      for (const event of localEvents) {
+        if (merged.some((item)=>item.id===event.id)) continue;
+        const response = await fetch("/backend/events",{method:"POST",headers:{"content-type":"application/json","x-app-key":key},body:JSON.stringify(event)});
+        const result = await response.json().catch(()=>({}));
+        if (!response.ok || !result.event) throw new Error(result.detail||"기존 일정 이전 실패");
+        merged.push(result.event as CalendarEvent);
+      }
+      localStorage.removeItem("moa-calendar-events");
+      return merged.sort((a,b)=>a.date.localeCompare(b.date));
+    } catch {
+      return state.events;
+    }
+  }
+
   async function loadState(key: string) {
     try {
       const response = await fetch("/backend/state", { headers: { "x-app-key": key }, cache: "no-store" });
       if (response.status === 401) {
+        sessionStorage.removeItem("family-key");
         setLocked(true);
         return false;
       }
       if (!response.ok) return false;
       const data = await response.json() as ServerState;
+      const sharedEvents = await migrateStoredEvents(key,data);
       setServerState(data);
+      setEvents(sharedEvents);
       setTransactions(data.transactions.map((item)=>({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner})));
       const summary = data.summary;
       const known = summary.real_estate_value + summary.investment_value + summary.cash_value;
@@ -786,6 +801,23 @@ export default function Home() {
     return headers;
   }
 
+  async function login() {
+    const response = await fetch("/backend/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({owner:loginOwner,password:accessKey})});
+    const result = await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.detail||"로그인하지 못했습니다.");
+    sessionStorage.setItem("family-key",result.token);
+    const loaded = await loadState(result.token);
+    if(!loaded)throw new Error("로그인 정보를 확인하지 못했습니다.");
+    setAccessKey("");
+  }
+
+  function logout() {
+    sessionStorage.removeItem("family-key");
+    setServerState(null);
+    setTab("summary");
+    setLocked(true);
+  }
+
   async function loadGowalterPrompt(key: string) {
     try {
       const response = await fetch("/backend/ai/prompt",{headers:{"x-app-key":key},cache:"no-store"});
@@ -815,8 +847,8 @@ export default function Home() {
     }
   }
 
-  async function importStocks(files: FileList | null) {
-    await importFile(files);
+  async function importStocks(files: FileList | null, owner: string) {
+    await importFile(files,owner);
   }
 
   async function refreshMarket() {
@@ -924,11 +956,13 @@ export default function Home() {
     const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
     const result = response?.ok ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string } }|null : null;
     const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
-    setEvents((current)=>{
-      const next = [...current,savedEvent].sort((a,b)=>a.date.localeCompare(b.date));
-      localStorage.setItem("moa-calendar-events",JSON.stringify(next));
-      return next;
-    });
+    const backendResponse = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(savedEvent)});
+    const backendResult = await backendResponse.json().catch(()=>({}));
+    if(!backendResponse.ok || !backendResult.event) {
+      localStorage.setItem("moa-calendar-events",JSON.stringify([...events,savedEvent]));
+      throw new Error(backendResult.detail||"일정을 공용 저장소에 저장하지 못했습니다.");
+    }
+    setEvents((current)=>[...current,backendResult.event as CalendarEvent].sort((a,b)=>a.date.localeCompare(b.date)));
     setModal(false);
     setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 앱에만 저장했어요. Google 연동 후 새로 등록하면 함께 저장됩니다.");
   }
@@ -942,11 +976,10 @@ export default function Home() {
         const result = await response.json().catch(()=>({}));
         if(!response.ok || !result.deleted)throw new Error(result.error||"Google Calendar에서 일정을 삭제하지 못했습니다.");
       }
-      setEvents((current)=>{
-        const next = current.filter((item)=>item.id!==event.id);
-        localStorage.setItem("moa-calendar-events",JSON.stringify(next));
-        return next;
-      });
+      const backendResponse = await fetch(`/backend/events/${encodeURIComponent(event.id)}`,{method:"DELETE",headers:authHeaders()});
+      const backendResult = await backendResponse.json().catch(()=>({}));
+      if(!backendResponse.ok || !backendResult.deleted)throw new Error(backendResult.detail||"공용 일정에서 삭제하지 못했습니다.");
+      setEvents((current)=>current.filter((item)=>item.id!==event.id));
       setToast(event.googleEventId?"앱과 Google Calendar에서 일정을 삭제했어요.":"앱에서 일정을 삭제했어요.");
     } catch(error) {
       setToast(error instanceof Error?error.message:"일정을 삭제하지 못했습니다.");
@@ -974,37 +1007,43 @@ export default function Home() {
   }
 
   if (locked) {
-    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>비공개 웹앱에 설정한 접근 키를 입력해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault(); const ok = await loadState(accessKey); if (!ok) setToast("접근 키가 맞지 않아요.");}}><input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="접근 키" autoComplete="current-password" required/><button className="primary-button full">들어가기</button></form></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
+    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>내 계정을 선택하고 가족 비밀번호로 로그인해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault();try{await login()}catch(error){setToast(error instanceof Error?error.message:"로그인하지 못했습니다.")}}}><label className="login-label">계정<select value={loginOwner} onChange={(event)=>setLoginOwner(event.target.value as typeof loginOwner)}><option>성근</option><option>지우</option><option>윤재</option></select></label><label className="login-label">비밀번호<input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="비밀번호" autoComplete="current-password" required/></label><button className="primary-button full">로그인</button></form><small className="login-role-note">성근 · 관리자 / 지우·윤재 · 본인 자산 조회</small></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
   }
 
   const allHoldings = serverState?.holdings||[];
   const cryptoHoldings = allHoldings.filter(isCryptoHolding);
   const stockHoldings = allHoldings.filter((item)=>!isCryptoHolding(item));
   const hiddenRealEstate = hiddenAssetKeys.includes("category:realestate");
+  const viewer = serverState?.viewer||{owner:"성근" as const,role:"admin" as const};
+  const isAdmin = viewer.role==="admin";
+  const displayedStockHoldings = isAdmin && stockOwnerFilter!=="전체" ? stockHoldings.filter((item)=>item.owner===stockOwnerFilter) : stockHoldings;
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((item)=>["summary","stocks","crypto","realestate","calendar"].includes(item.id));
+  const visibleEvents = isAdmin ? events : events.filter((event)=>event.owner===viewer.owner);
+  const bottomItems = isAdmin ? [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}] : [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"calendar",label:"일정",icon:"calendar"}];
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <button className="brand" onClick={()=>setTab("summary")} aria-label="모아 홈"><span className="brand-mark"><i/><i/><i/></span><span><b>모아</b><small>우리 가족의 자산</small></span></button>
-        <div className="top-actions"><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name={hidden?"eyeOff":"eye"} /></button><button className="avatar-button">우</button></div>
+        <div className="top-actions"><span className={`role-badge ${viewer.role}`}>{viewer.role==="admin"?"관리자":"게스트"}</span><button onClick={()=>setHidden(!hidden)} aria-label={hidden?"금액 표시":"금액 숨기기"}><Icon name={hidden?"eyeOff":"eye"} /></button><button className="avatar-button" onClick={logout} title="로그아웃">{viewer.owner.slice(0,1)}</button></div>
       </header>
 
-      <nav className="top-nav" aria-label="전체 메뉴">{navItems.map((item)=><button key={item.id} className={tab===item.id?"active":""} onClick={()=>setTab(item.id)}>{item.label}</button>)}</nav>
+      <nav className="top-nav" aria-label="전체 메뉴">{visibleNavItems.map((item)=><button key={item.id} className={tab===item.id?"active":""} onClick={()=>setTab(item.id)}>{item.label}</button>)}</nav>
 
       <div className="content">
-        {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
+        {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} readOnly={!isAdmin} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} holdings={stockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
+        {tab === "stocks" && <Stocks hidden={hidden} readOnly={!isAdmin} ownerFilter={stockOwnerFilter} onOwnerFilter={setStockOwnerFilter} holdings={displayedStockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
         {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
-        {tab === "crypto" && <Crypto hidden={hidden} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
-        {tab === "realestate" && <RealEstate hidden={hidden} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
-        {tab === "calendar" && <CalendarScreen events={events} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
+        {tab === "crypto" && <Crypto hidden={hidden} readOnly={!isAdmin} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
+        {tab === "realestate" && <RealEstate hidden={hidden} readOnly={!isAdmin} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
+        {tab === "calendar" && <CalendarScreen events={visibleEvents} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 
-      <button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? openEventModal() : setTab("ledger")}><Icon name="plus" /></button>
-      <nav className="bottom-nav" aria-label="주요 메뉴">
-        {[{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}].map((item)=><button key={item.id} className={tab===item.id || (item.id==="stocks" && ["family","crypto","realestate"].includes(tab))?"active":""} onClick={()=>setTab(item.id as TabId)}><Icon name={item.icon}/><small>{item.label}</small></button>)}
+      {isAdmin&&<button className="fab" aria-label="빠른 추가" onClick={()=>tab === "calendar" ? openEventModal() : setTab("ledger")}><Icon name="plus" /></button>}
+      <nav className="bottom-nav" aria-label="주요 메뉴" style={{gridTemplateColumns:`repeat(${bottomItems.length},1fr)`}}>
+        {bottomItems.map((item)=><button key={item.id} className={tab===item.id || (item.id==="stocks" && ["family","crypto","realestate"].includes(tab))?"active":""} onClick={()=>setTab(item.id as TabId)}><Icon name={item.icon}/><small>{item.label}</small></button>)}
       </nav>
       <div className="sr-only" aria-live="polite">현재 화면: {activeTitle}</div>
       {toast && <div className="toast" role="status">{toast}</div>}

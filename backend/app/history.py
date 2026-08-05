@@ -18,10 +18,17 @@ def _is_cash_category(category: str) -> bool:
     return any(word in normalized for word in ("자유입출금", "현금", "저축", "전자금융", "신탁"))
 
 
-def calculate_summary(db: Session) -> dict[str, float]:
-    assets = list(db.scalars(select(AssetItem).where(AssetItem.is_active.is_(True))))
-    holdings = list(db.scalars(select(Holding).where(Holding.is_active.is_(True))))
-    debts = list(db.scalars(select(Debt).where(Debt.is_active.is_(True))))
+def calculate_summary(db: Session, owner: str | None = None) -> dict[str, float]:
+    asset_query = select(AssetItem).where(AssetItem.is_active.is_(True))
+    holding_query = select(Holding).where(Holding.is_active.is_(True))
+    debt_query = select(Debt).where(Debt.is_active.is_(True))
+    if owner:
+        asset_query = asset_query.where(AssetItem.owner == owner)
+        holding_query = holding_query.where(Holding.owner == owner)
+        debt_query = debt_query.where(Debt.owner == owner)
+    assets = list(db.scalars(asset_query))
+    holdings = list(db.scalars(holding_query))
+    debts = list(db.scalars(debt_query))
 
     investment_value = sum(item.market_value for item in holdings)
     investment_principal = sum(item.principal for item in holdings)

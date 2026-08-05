@@ -41,6 +41,10 @@ class Settings:
     project_dir: Path = PROJECT_DIR
     data_dir: Path = _data_dir()
     access_key: str = os.getenv("APP_ACCESS_KEY", "")
+    auth_secret: str = os.getenv("AUTH_SECRET", "") or os.getenv("APP_ACCESS_KEY", "") or os.getenv("ADMIN_PASSWORD", "") or os.getenv("JIWOO_GUEST_PASSWORD", "") or os.getenv("YOONJAE_GUEST_PASSWORD", "") or "moa-local-development"
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "") or os.getenv("APP_ACCESS_KEY", "")
+    jiwoo_guest_password: str = os.getenv("JIWOO_GUEST_PASSWORD", "")
+    yoonjae_guest_password: str = os.getenv("YOONJAE_GUEST_PASSWORD", "")
     backend_url: str = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
