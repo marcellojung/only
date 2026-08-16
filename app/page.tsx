@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 type TabId =
   | "summary"
@@ -63,6 +63,7 @@ type HoldingData = {
   target_price: number;
   target_alert_enabled: boolean;
   target_alert_sent_at: string;
+  average_price_krw?: number;
 };
 
 type AssetSummary = {
@@ -158,6 +159,14 @@ type CalendarConnectionStatus = {
   calendarId?:string;
 };
 
+type VersionInfo = { version:string; revision:string; started_at:string };
+
+async function requestVersionInfo() {
+  const response = await fetch("/api/version",{cache:"no-store"});
+  if(!response.ok)throw new Error("version unavailable");
+  return await response.json() as VersionInfo;
+}
+
 type HoldingCreatePayload = {
   owner: string;
   asset_type: "주식" | "ETF" | "펀드" | "코인";
@@ -166,6 +175,8 @@ type HoldingCreatePayload = {
   ticker: string;
   quantity: number;
   principal: number;
+  average_price: number;
+  average_price_currency: "KRW" | "USD";
 };
 
 type DebtData = {
@@ -367,6 +378,8 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
   const [editing, setEditing] = useState(false);
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
+  const [quantity, setQuantity] = useState(item.quantity ? String(item.quantity) : "");
+  const [averagePrice, setAveragePrice] = useState(item.quantity ? String(item.principal/item.quantity) : "");
   const estimated = item.quantity_source === "estimated_from_import_value";
   const profit = item.market_value-item.principal;
   const returnPercent = item.return_rate*100;
@@ -383,7 +396,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
     </button>
     <div className="holding-infographic">
       <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={masked}>{compactMoney(item.market_value)}</Amount></strong></div>
-      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong></div>
+      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong><small><Amount hidden={masked}>{item.quantity?`원화 평단 ${money(item.principal/item.quantity)}원`:"평단 입력 필요"}</Amount></small></div>
       <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={masked}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
       <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={masked}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
       <div className="return-visual" aria-label={`${item.name} 수익률 ${returnPercent.toFixed(1)}퍼센트`}>
@@ -392,8 +405,10 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
       </div>
       <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button>{!readOnly&&<b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b>}</div>
     </div>
-    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
+    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,quantity:Number(quantity),average_price_krw:Number(averagePrice),target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
+      <label>보유 수량<input type="number" min="0.00000001" step="any" value={quantity} onChange={(event)=>setQuantity(event.target.value)} placeholder="10" required/></label>
+      <label>원화 환산 평단<input type="number" min="0.00000001" step="any" value={averagePrice} onChange={(event)=>setAveragePrice(event.target.value)} placeholder="평균 매입가" required/></label>
       <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
       <button className="primary-button small">저장</button>
       <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
@@ -604,13 +619,32 @@ const integrationLabels: Record<string,[string,string,string]> = {
 };
 
 function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMode: boolean; integrations: IntegrationStatus; busy: string; onProbe:()=>void }) {
+  const [versionInfo,setVersionInfo] = useState<VersionInfo|null>(null);
+  const [versionError,setVersionError] = useState(false);
+  const [funnelGuideOpen,setFunnelGuideOpen] = useState(false);
+  const currentOrigin = useSyncExternalStore(()=>()=>{},()=>window.location.origin,()=>"");
+  async function loadVersion() {
+    try {
+      setVersionInfo(await requestVersionInfo());
+      setVersionError(false);
+    } catch {
+      setVersionError(true);
+    }
+  }
+  useEffect(()=>{
+    let active = true;
+    void requestVersionInfo().then((info)=>{if(active)setVersionInfo(info);}).catch(()=>{if(active)setVersionError(true);});
+    return ()=>{active=false;};
+  },[]);
+  const usingFunnelAddress = currentOrigin.endsWith(".ts.net");
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
       <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
       <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{key==="auto_refresh"&&status.detail?` · ${status.detail}`:""}{status.last_checked_at?` · 최근 ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
-      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
-      <div className="privacy-note"><b>우리 가족만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
+      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>가족별 로그인</b><small>{protectedMode?"HttpOnly 보안 세션으로 로그인 상태 보호":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"비밀번호 설정 필요"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button><button type="button" className={`tailscale-row ${funnelGuideOpen?"expanded":""}`} aria-expanded={funnelGuideOpen} onClick={()=>setFunnelGuideOpen((open)=>!open)}><span className="settings-symbol tailscale">TS</span><div><b>앱 설치 없는 외부 접속</b><small>{usingFunnelAddress?currentOrigin:"Tailscale Funnel 공개 HTTPS 주소"}</small></div><em className={usingFunnelAddress?"connected":""}>{funnelGuideOpen?"닫기":usingFunnelAddress?"Funnel 주소":"안내 보기"}</em></button>{funnelGuideOpen&&<div className="tailscale-guide"><b>가족 아이폰에는 Tailscale이 필요 없어요</b><ol><li>Windows 서버에만 Tailscale이 설치됩니다.</li><li>가족은 이 <strong>*.ts.net</strong> 주소를 Safari에서 바로 엽니다.</li><li>각자 성근·지우·윤재 계정과 비밀번호로 로그인합니다.</li><li>Safari의 공유 → 홈 화면에 추가로 앱처럼 사용합니다.</li></ol><p>Funnel 주소 자체는 공개 인터넷에서 접근 가능하므로 주소를 외부에 공유하지 말고, 가족 비밀번호를 서로 다르게 유지하세요.</p></div>}</div>
+      <div className="settings-group"><h2>앱 정보</h2><button type="button" onClick={()=>void loadVersion()}><span className="settings-symbol version">V</span><div><b>{versionInfo?`모아 v${versionInfo.version}`:"버전 확인 중"}</b><small>{versionInfo?`실행 시작 ${new Intl.DateTimeFormat("ko-KR",{dateStyle:"short",timeStyle:"short"}).format(new Date(versionInfo.started_at))} · 눌러서 다시 확인`:versionError?"버전 정보를 확인하지 못했습니다.":"현재 실행 버전을 읽고 있습니다."}</small></div><em className={versionInfo?"connected":""}>{versionInfo?.revision||"확인 중"}</em></button></div>
+      <div className="privacy-note"><b>가족 계정으로 보호돼요</b><p>검색엔진 색인을 차단하고 HTTPS, 로그인 시도 제한, 보안 쿠키와 가족별 권한으로 데이터를 보호합니다.</p></div>
     </section>
   );
 }
@@ -631,6 +665,7 @@ function QuickAddModal({ onClose, onStock, onCrypto, onDebt, onCalendar, onLedge
 
 function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCreatePayload["asset_type"]; onClose:()=>void; onSave:(payload:HoldingCreatePayload)=>Promise<void> }) {
   const [assetType,setAssetType] = useState<HoldingCreatePayload["asset_type"]>(initialType);
+  const [averageCurrency,setAverageCurrency] = useState<"KRW"|"USD">("KRW");
   const [saving,setSaving] = useState(false);
   const cryptoPresets = [{name:"비트코인",ticker:"BTC"},{name:"이더리움",ticker:"ETH"},{name:"리플",ticker:"XRP"},{name:"솔라나",ticker:"SOL"}];
   async function submit(event:FormEvent<HTMLFormElement>) {
@@ -641,18 +676,21 @@ function AssetModal({ initialType, onClose, onSave }: { initialType: HoldingCrea
       await onSave({
         owner:String(form.get("owner")), asset_type:assetType, broker:String(form.get("broker")),
         name:String(form.get("name")), ticker:String(form.get("ticker")),
-        quantity:Number(form.get("quantity")), principal:Number(form.get("principal")) || 0,
+        quantity:Number(form.get("quantity")), principal:0,
+        average_price:Number(form.get("average_price")), average_price_currency:averageCurrency,
       });
     } finally { setSaving(false); }
   }
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal asset-modal" onMouseDown={(event)=>event.stopPropagation()}>
     <div className="modal-head"><div><span className="eyebrow">직접 등록</span><h2>자산 추가</h2></div><button onClick={onClose} aria-label="닫기">×</button></div>
     <form onSubmit={submit}>
-      <div className="form-row"><label>자산 유형<select value={assetType} onChange={(event)=>setAssetType(event.target.value as HoldingCreatePayload["asset_type"])}><option>주식</option><option>ETF</option><option>펀드</option><option>코인</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
+      <div className="form-row"><label>자산 유형<select value={assetType} onChange={(event)=>{const next=event.target.value as HoldingCreatePayload["asset_type"];setAssetType(next);if(next==="코인")setAverageCurrency("KRW");}}><option>주식</option><option>ETF</option><option>펀드</option><option>코인</option></select></label><label>소유자<select name="owner" defaultValue="성근"><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select></label></div>
       {assetType==="코인"&&<div className="asset-presets">{cryptoPresets.map((coin)=><button key={coin.ticker} type="button" onClick={(event)=>{const form=event.currentTarget.closest("form");const name=form?.elements.namedItem("name") as HTMLInputElement|null;const ticker=form?.elements.namedItem("ticker") as HTMLInputElement|null;if(name)name.value=coin.name;if(ticker)ticker.value=coin.ticker;}}>{coin.ticker}</button>)}</div>}
       <label>자산 이름<input name="name" placeholder={assetType==="코인"?"예: 비트코인":"예: 삼성전자"} required autoFocus /></label>
       <div className="form-row"><label>티커·심볼<input name="ticker" placeholder={assetType==="코인"?"BTC":"005930.KS / AAPL"} required={assetType!=="펀드"} /></label><label>금융사·거래소<input name="broker" defaultValue={assetType==="코인"?"직접 입력":"직접 입력"} /></label></div>
-      <div className="form-row"><label>보유 수량<input name="quantity" type="number" min="0" step="any" placeholder="0.1" required /></label><label>투자 원금(원)<input name="principal" type="number" min="0" step="1" placeholder="선택 입력" /></label></div>
+      <div className="form-row"><label>보유 수량<input name="quantity" type="number" min="0.00000001" step="any" placeholder="0.1" required /></label><label>평균 매입가<input name="average_price" type="number" min="0.00000001" step="any" placeholder={averageCurrency==="USD"?"예: 180.50":"예: 95000"} required /></label></div>
+      <label>평단 통화<select value={averageCurrency} onChange={(event)=>setAverageCurrency(event.target.value as "KRW"|"USD")}><option value="KRW">원화 (KRW)</option>{assetType!=="코인"&&<option value="USD">달러 (USD)</option>}</select></label>
+      <p className="form-hint">보유 수량 × 평균 매입가로 투자 원금을 자동 계산합니다.{averageCurrency==="USD"?" 현재 USD/KRW 환율로 원화 환산합니다.":""}</p>
       {assetType==="코인"&&<p className="form-hint">심볼은 자동으로 BTC-KRW 같은 원화 시세 페어로 저장됩니다.</p>}
       <button className="primary-button full" disabled={saving}>{saving?"등록 중…":"자산 등록"}</button>
     </form>
@@ -731,7 +769,8 @@ export default function Home() {
   const [reportError,setReportError] = useState("");
 
   useEffect(() => {
-    void loadState(sessionStorage.getItem("family-key") || "");
+    sessionStorage.removeItem("family-key");
+    void loadState();
     const savedHidden = localStorage.getItem("moa-hidden-assets");
     if (savedHidden) {
       try {
@@ -751,7 +790,7 @@ export default function Home() {
 
   const activeTitle = useMemo(() => navItems.find((item)=>item.id===tab)?.label, [tab]);
 
-  async function migrateStoredEvents(key:string, state:ServerState) {
+  async function migrateStoredEvents(state:ServerState) {
     const saved = localStorage.getItem("moa-calendar-events");
     if (!saved || state.viewer.role !== "admin") return state.events;
     try {
@@ -759,7 +798,7 @@ export default function Home() {
       const merged = [...state.events];
       for (const event of localEvents) {
         if (merged.some((item)=>item.id===event.id)) continue;
-        const response = await fetch("/backend/events",{method:"POST",headers:{"content-type":"application/json","x-app-key":key},body:JSON.stringify(event)});
+        const response = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(event)});
         const result = await response.json().catch(()=>({}));
         if (!response.ok || !result.event) throw new Error(result.detail||"기존 일정 이전 실패");
         merged.push(result.event as CalendarEvent);
@@ -771,17 +810,16 @@ export default function Home() {
     }
   }
 
-  async function loadState(key: string) {
+  async function loadState() {
     try {
-      const response = await fetch("/backend/state", { headers: { "x-app-key": key }, cache: "no-store" });
+      const response = await fetch("/backend/state", { cache: "no-store" });
       if (response.status === 401) {
-        sessionStorage.removeItem("family-key");
         setLocked(true);
         return false;
       }
       if (!response.ok) return false;
       const data = await response.json() as ServerState;
-      const sharedEvents = await migrateStoredEvents(key,data);
+      const sharedEvents = await migrateStoredEvents(data);
       setServerState(data);
       setEvents(sharedEvents);
       setTransactions(data.transactions.map((item)=>({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner})));
@@ -802,8 +840,7 @@ export default function Home() {
       });
       setProtectedMode(Boolean(data.protected));
       setLocked(false);
-      if (key) sessionStorage.setItem("family-key", key);
-      void loadGowalterPrompt(key);
+      void loadGowalterPrompt();
       return true;
     } catch {
       return false;
@@ -811,31 +848,30 @@ export default function Home() {
   }
 
   function authHeaders(json = false) {
-    const headers: Record<string,string> = { "x-app-key": sessionStorage.getItem("family-key") || "" };
+    const headers: Record<string,string> = { "x-moa-request": "1" };
     if (json) headers["content-type"] = "application/json";
     return headers;
   }
 
   async function login() {
-    const response = await fetch("/backend/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({owner:loginOwner,password:accessKey})});
+    const response = await fetch("/backend/auth/login",{method:"POST",headers:authHeaders(true),body:JSON.stringify({owner:loginOwner,password:accessKey})});
     const result = await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(result.detail||"로그인하지 못했습니다.");
-    sessionStorage.setItem("family-key",result.token);
-    const loaded = await loadState(result.token);
+    const loaded = await loadState();
     if(!loaded)throw new Error("로그인 정보를 확인하지 못했습니다.");
     setAccessKey("");
   }
 
-  function logout() {
-    sessionStorage.removeItem("family-key");
+  async function logout() {
+    await fetch("/backend/auth/logout",{method:"POST",headers:authHeaders()}).catch(()=>null);
     setServerState(null);
     setTab("summary");
     setLocked(true);
   }
 
-  async function loadGowalterPrompt(key: string) {
+  async function loadGowalterPrompt() {
     try {
-      const response = await fetch("/backend/ai/prompt",{headers:{"x-app-key":key},cache:"no-store"});
+      const response = await fetch("/backend/ai/prompt",{cache:"no-store"});
       if(response.ok)setGowalterPrompt(await response.json() as GowalterPrompt);
     } catch {
       // 기본 AI 분석은 프롬프트 미리보기가 없어도 계속 사용할 수 있습니다.
@@ -852,7 +888,7 @@ export default function Home() {
       const response = await fetch(`/backend/import?owner=${encodeURIComponent(owner)}`,{method:"POST",headers:authHeaders(),body:form});
       const result = await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"업로드 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setImportStatus({label:file.name,importedAt:new Date().toISOString(),transactionCount:result.transactions_read||0,holdingCount:result.holdings_updated||0});
       setToast(`가계부 ${result.transactions_added}건 추가 · 투자상품 ${result.holdings_updated}개 갱신`);
     } catch (error) {
@@ -872,7 +908,7 @@ export default function Home() {
       const response=await fetch("/backend/market/refresh",{method:"POST",headers:authHeaders()});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"갱신 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast(`현재가 ${result.updated}개 갱신 · 티커 ${result.tickers_resolved}개 확인`);
     } catch(error){setToast(error instanceof Error?error.message:"현재가를 갱신하지 못했어요.");} finally{setBusy("");}
   }
@@ -883,7 +919,7 @@ export default function Home() {
       const response=await fetch("/backend/ai/analyze",{method:"POST",headers:authHeaders(true),body:JSON.stringify({prompt})});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"분석 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast(`${result.provider==="openai"?"OpenAI":"로컬"} 분석을 누적 저장했어요.`);
     } catch(error){setToast(error instanceof Error?error.message:"AI 분석을 만들지 못했어요.");} finally{setBusy("");}
   }
@@ -894,7 +930,7 @@ export default function Home() {
       const response=await fetch(`/backend/holdings/${id}`,{method:"PATCH",headers:authHeaders(true),body:JSON.stringify(data)});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"저장 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast("티커와 목표가를 저장했어요.");
     } catch(error){setToast(error instanceof Error?error.message:"종목 설정을 저장하지 못했어요.");} finally{setBusy("");}
   }
@@ -916,7 +952,7 @@ export default function Home() {
       const response = await fetch("/backend/holdings",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
       const result = await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(result.detail||"자산을 등록하지 못했습니다.");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setAssetModalType(null);
       setToast(result.quote_updated?"자산을 등록하고 원화 시세를 반영했어요.":"자산을 등록했어요. 시세 갱신을 다시 눌러 주세요.");
     } catch(error) {
@@ -931,7 +967,7 @@ export default function Home() {
       const response = await fetch("/backend/debts",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
       const result = await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(result.detail||"부채를 등록하지 못했습니다.");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setDebtModal(false);
       setToast("부채를 등록하고 순자산에 반영했어요.");
     } catch(error) {
@@ -968,7 +1004,7 @@ export default function Home() {
   }
 
   async function addEvent(event: CalendarEvent) {
-    const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
+    const response = await fetch("/api/calendar", { method:"POST", headers:authHeaders(true), body:JSON.stringify(event) }).catch(()=>null);
     const result = response?.ok ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string } }|null : null;
     const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
     const backendResponse = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(savedEvent)});

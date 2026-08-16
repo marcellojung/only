@@ -1,5 +1,6 @@
 import { checkCalendarConnection, createCalendarEvent, deleteCalendarEvent } from "../../../lib/google-calendar";
 import { backendViewer } from "../../../lib/backend-auth";
+import { acceptsMutation } from "../../../lib/session";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!acceptsMutation(request)) return Response.json({ error: "invalid request" }, { status: 403 });
   const viewer = await backendViewer(request);
   if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
   if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });
@@ -25,6 +27,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!acceptsMutation(request)) return Response.json({ error: "invalid request" }, { status: 403 });
   const viewer = await backendViewer(request);
   if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
   if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });

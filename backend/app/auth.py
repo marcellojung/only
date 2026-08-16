@@ -6,12 +6,44 @@ import base64
 import hashlib
 import hmac
 import json
+import threading
 import time
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException
 
 from .config import settings
+
+
+class LoginRateLimiter:
+    def __init__(self, maximum: int = 8, window_seconds: int = 15 * 60):
+        self.maximum = maximum
+        self.window_seconds = window_seconds
+        self._attempts: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def retry_after(self, client_id: str, now: float | None = None) -> int:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            attempts = [stamp for stamp in self._attempts.get(client_id, []) if current - stamp < self.window_seconds]
+            self._attempts[client_id] = attempts
+            if len(attempts) < self.maximum:
+                return 0
+            return max(1, int(self.window_seconds - (current - attempts[0])))
+
+    def record_failure(self, client_id: str, now: float | None = None) -> None:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            attempts = [stamp for stamp in self._attempts.get(client_id, []) if current - stamp < self.window_seconds]
+            attempts.append(current)
+            self._attempts[client_id] = attempts
+
+    def record_success(self, client_id: str) -> None:
+        with self._lock:
+            self._attempts.pop(client_id, None)
+
+
+login_rate_limiter = LoginRateLimiter()
 
 
 @dataclass(frozen=True)
@@ -73,9 +105,9 @@ def current_user(x_app_key: str = Header(default="")) -> Viewer:
     if viewer:
         return viewer
     # Existing installations can keep using APP_ACCESS_KEY during migration.
-    if settings.access_key and hmac.compare_digest(x_app_key, settings.access_key):
+    if settings.public_access_mode != "funnel" and settings.access_key and hmac.compare_digest(x_app_key, settings.access_key):
         return Viewer(owner="성근", role="admin")
-    if not any((settings.admin_password, settings.access_key, settings.jiwoo_guest_password, settings.yoonjae_guest_password)):
+    if settings.public_access_mode != "funnel" and not any((settings.admin_password, settings.access_key, settings.jiwoo_guest_password, settings.yoonjae_guest_password)):
         return Viewer(owner="성근", role="admin")
     raise HTTPException(status_code=401, detail="unauthorized")
 

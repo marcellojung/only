@@ -6,18 +6,19 @@ from contextlib import asynccontextmanager
 from datetime import date
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .ai import analyze_portfolio, portfolio_prompt
-from .auth import Viewer, authenticate, current_user, issue_token, require_admin
+from .auth import Viewer, authenticate, current_user, issue_token, login_rate_limiter, require_admin
+from .config import settings
 from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
 from .importer import import_upload
-from .market import normalize_user_symbol, refresh_exchange_rate, refresh_holding_quote, refresh_market
+from .market import latest_exchange_rate, normalize_user_symbol, refresh_exchange_rate, refresh_holding_quote, refresh_market
 from .models import AlertEvent, Debt, FamilyEvent, Holding
 from .news import search_company_news
 from .opendart import build_holding_report
@@ -29,6 +30,7 @@ from .telegram import send_telegram_message
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    settings.validate_security()
     init_db()
     scheduler_task = start_auto_refresh()
     try:
@@ -50,6 +52,7 @@ app.add_middleware(
 class HoldingPatch(BaseModel):
     ticker: str | None = Field(default=None, max_length=40)
     quantity: float | None = Field(default=None, ge=0)
+    average_price_krw: float | None = Field(default=None, gt=0)
     target_price: float | None = Field(default=None, ge=0)
     target_alert_enabled: bool | None = None
 
@@ -62,6 +65,8 @@ class HoldingCreate(BaseModel):
     ticker: str = Field(default="", max_length=40)
     quantity: float = Field(gt=0)
     principal: float = Field(default=0, ge=0)
+    average_price: float = Field(default=0, ge=0)
+    average_price_currency: str = Field(default="KRW", max_length=10)
 
 
 class DebtCreate(BaseModel):
@@ -100,10 +105,20 @@ def health(db: Session = Depends(get_db)) -> dict[str, object]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginPayload) -> dict[str, object]:
+def login(payload: LoginPayload, x_client_ip: str = Header(default="unknown", max_length=80)) -> dict[str, object]:
+    client_id = x_client_ip.strip() or "unknown"
+    retry_after = login_rate_limiter.retry_after(client_id)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail=f"로그인 시도가 너무 많습니다. {max(1, retry_after // 60)}분 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
     viewer = authenticate(payload.owner.strip(), payload.password)
     if not viewer:
+        login_rate_limiter.record_failure(client_id)
         raise HTTPException(status_code=401, detail="이름 또는 비밀번호가 맞지 않습니다.")
+    login_rate_limiter.record_success(client_id)
     return {"token": issue_token(viewer), "viewer": {"owner": viewer.owner, "role": viewer.role}}
 
 
@@ -164,6 +179,21 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
     symbol = normalize_user_symbol(payload.asset_type, payload.ticker, payload.name)
     if payload.asset_type in {"코인", "암호화폐"} and not symbol:
         raise HTTPException(status_code=400, detail="코인 심볼을 입력해 주세요.")
+    average_currency = payload.average_price_currency.strip().upper()
+    if average_currency not in {"KRW", "USD"}:
+        raise HTTPException(status_code=400, detail="평단 통화는 KRW 또는 USD만 지원합니다.")
+    principal = payload.principal
+    if payload.average_price:
+        fx = 1.0
+        if average_currency == "USD":
+            exchange = latest_exchange_rate(db)
+            if not exchange:
+                try:
+                    exchange = refresh_exchange_rate(db)
+                except Exception as exc:
+                    raise HTTPException(status_code=502, detail="USD 평단 환산에 필요한 환율을 가져오지 못했습니다.") from exc
+            fx = exchange.rate
+        principal = payload.quantity * payload.average_price * fx
     holding = Holding(
         owner=payload.owner.strip(),
         source_key=f"manual:{uuid4().hex}",
@@ -173,8 +203,8 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
         ticker=symbol,
         ticker_source="user" if symbol else "",
         currency="KRW",
-        principal=payload.principal,
-        market_value=payload.principal,
+        principal=principal,
+        market_value=principal,
         quantity=payload.quantity,
         quantity_source="user",
         price_source="manual",
@@ -185,7 +215,7 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
     quote_updated = refresh_holding_quote(db, holding)
     create_portfolio_snapshot(db, source="holding_create")
     db.commit()
-    return {"ok": True, "holding_id": holding.id, "quote_updated": quote_updated, "ticker": holding.ticker}
+    return {"ok": True, "holding_id": holding.id, "quote_updated": quote_updated, "ticker": holding.ticker, "principal": holding.principal}
 
 
 @app.post("/api/debts", dependencies=[Depends(require_admin)])
@@ -257,6 +287,7 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
     if not holding or not holding.is_active:
         raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
     values = payload.model_dump(exclude_unset=True)
+    average_price_krw = values.pop("average_price_krw", None)
     previous_target = holding.target_price
     for key, value in values.items():
         if key == "ticker" and isinstance(value, str):
@@ -265,6 +296,10 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
         if key == "quantity" and value is not None:
             holding.quantity_source = "user"
         setattr(holding, key, value)
+    if average_price_krw is not None:
+        if not holding.quantity:
+            raise HTTPException(status_code=400, detail="평단을 저장하려면 보유 수량이 필요합니다.")
+        holding.principal = average_price_krw * holding.quantity
     if "target_price" in values and holding.target_price != previous_target:
         holding.target_alert_sent_at = None
     create_portfolio_snapshot(db, source="holding_update")

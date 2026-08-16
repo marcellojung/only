@@ -8,4 +8,12 @@ if (Test-Path $PidFile) {
     Remove-Item $PidFile -Force
 }
 
-Write-Host "모아 자산 앱을 중지했습니다. Tailscale 비공개 네트워크는 유지됩니다."
+$Tailscale = Get-Command "tailscale.exe" -ErrorAction SilentlyContinue
+if ($Tailscale) {
+    & $Tailscale.Source funnel reset | Out-Null
+} else {
+    $Candidate = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+    if (Test-Path $Candidate) { & $Candidate funnel reset | Out-Null }
+}
+
+Write-Host "모아 자산 앱과 Tailscale Funnel 공개 연결을 중지했습니다."
