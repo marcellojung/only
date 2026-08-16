@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 type TabId =
   | "summary"
@@ -162,7 +162,7 @@ type CalendarConnectionStatus = {
 type VersionInfo = { version:string; revision:string; started_at:string };
 
 async function requestVersionInfo() {
-  const response = await fetch("/api/version",{headers:{"x-app-key":sessionStorage.getItem("family-key")||""},cache:"no-store"});
+  const response = await fetch("/api/version",{cache:"no-store"});
   if(!response.ok)throw new Error("version unavailable");
   return await response.json() as VersionInfo;
 }
@@ -621,6 +621,8 @@ const integrationLabels: Record<string,[string,string,string]> = {
 function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMode: boolean; integrations: IntegrationStatus; busy: string; onProbe:()=>void }) {
   const [versionInfo,setVersionInfo] = useState<VersionInfo|null>(null);
   const [versionError,setVersionError] = useState(false);
+  const [funnelGuideOpen,setFunnelGuideOpen] = useState(false);
+  const currentOrigin = useSyncExternalStore(()=>()=>{},()=>window.location.origin,()=>"");
   async function loadVersion() {
     try {
       setVersionInfo(await requestVersionInfo());
@@ -634,14 +636,15 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
     void requestVersionInfo().then((info)=>{if(active)setVersionInfo(info);}).catch(()=>{if(active)setVersionError(true);});
     return ()=>{active=false;};
   },[]);
+  const usingFunnelAddress = currentOrigin.endsWith(".ts.net");
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
       <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
       <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{key==="auto_refresh"&&status.detail?` · ${status.detail}`:""}{status.last_checked_at?` · 최근 ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
-      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>접근 보호</b><small>{protectedMode?"APP_ACCESS_KEY로 보호됨":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"키 설정 권장"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button></div>
+      <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>가족별 로그인</b><small>{protectedMode?"HttpOnly 보안 세션으로 로그인 상태 보호":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"비밀번호 설정 필요"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button><button type="button" className={`tailscale-row ${funnelGuideOpen?"expanded":""}`} aria-expanded={funnelGuideOpen} onClick={()=>setFunnelGuideOpen((open)=>!open)}><span className="settings-symbol tailscale">TS</span><div><b>앱 설치 없는 외부 접속</b><small>{usingFunnelAddress?currentOrigin:"Tailscale Funnel 공개 HTTPS 주소"}</small></div><em className={usingFunnelAddress?"connected":""}>{funnelGuideOpen?"닫기":usingFunnelAddress?"Funnel 주소":"안내 보기"}</em></button>{funnelGuideOpen&&<div className="tailscale-guide"><b>가족 아이폰에는 Tailscale이 필요 없어요</b><ol><li>Windows 서버에만 Tailscale이 설치됩니다.</li><li>가족은 이 <strong>*.ts.net</strong> 주소를 Safari에서 바로 엽니다.</li><li>각자 성근·지우·윤재 계정과 비밀번호로 로그인합니다.</li><li>Safari의 공유 → 홈 화면에 추가로 앱처럼 사용합니다.</li></ol><p>Funnel 주소 자체는 공개 인터넷에서 접근 가능하므로 주소를 외부에 공유하지 말고, 가족 비밀번호를 서로 다르게 유지하세요.</p></div>}</div>
       <div className="settings-group"><h2>앱 정보</h2><button type="button" onClick={()=>void loadVersion()}><span className="settings-symbol version">V</span><div><b>{versionInfo?`모아 v${versionInfo.version}`:"버전 확인 중"}</b><small>{versionInfo?`실행 시작 ${new Intl.DateTimeFormat("ko-KR",{dateStyle:"short",timeStyle:"short"}).format(new Date(versionInfo.started_at))} · 눌러서 다시 확인`:versionError?"버전 정보를 확인하지 못했습니다.":"현재 실행 버전을 읽고 있습니다."}</small></div><em className={versionInfo?"connected":""}>{versionInfo?.revision||"확인 중"}</em></button></div>
-      <div className="privacy-note"><b>우리 가족만 볼 수 있어요</b><p>검색엔진에 노출하지 않고, 서버 접근 키와 HTTPS로 보호하도록 설계했습니다.</p></div>
+      <div className="privacy-note"><b>가족 계정으로 보호돼요</b><p>검색엔진 색인을 차단하고 HTTPS, 로그인 시도 제한, 보안 쿠키와 가족별 권한으로 데이터를 보호합니다.</p></div>
     </section>
   );
 }
@@ -766,7 +769,8 @@ export default function Home() {
   const [reportError,setReportError] = useState("");
 
   useEffect(() => {
-    void loadState(sessionStorage.getItem("family-key") || "");
+    sessionStorage.removeItem("family-key");
+    void loadState();
     const savedHidden = localStorage.getItem("moa-hidden-assets");
     if (savedHidden) {
       try {
@@ -786,7 +790,7 @@ export default function Home() {
 
   const activeTitle = useMemo(() => navItems.find((item)=>item.id===tab)?.label, [tab]);
 
-  async function migrateStoredEvents(key:string, state:ServerState) {
+  async function migrateStoredEvents(state:ServerState) {
     const saved = localStorage.getItem("moa-calendar-events");
     if (!saved || state.viewer.role !== "admin") return state.events;
     try {
@@ -794,7 +798,7 @@ export default function Home() {
       const merged = [...state.events];
       for (const event of localEvents) {
         if (merged.some((item)=>item.id===event.id)) continue;
-        const response = await fetch("/backend/events",{method:"POST",headers:{"content-type":"application/json","x-app-key":key},body:JSON.stringify(event)});
+        const response = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(event)});
         const result = await response.json().catch(()=>({}));
         if (!response.ok || !result.event) throw new Error(result.detail||"기존 일정 이전 실패");
         merged.push(result.event as CalendarEvent);
@@ -806,17 +810,16 @@ export default function Home() {
     }
   }
 
-  async function loadState(key: string) {
+  async function loadState() {
     try {
-      const response = await fetch("/backend/state", { headers: { "x-app-key": key }, cache: "no-store" });
+      const response = await fetch("/backend/state", { cache: "no-store" });
       if (response.status === 401) {
-        sessionStorage.removeItem("family-key");
         setLocked(true);
         return false;
       }
       if (!response.ok) return false;
       const data = await response.json() as ServerState;
-      const sharedEvents = await migrateStoredEvents(key,data);
+      const sharedEvents = await migrateStoredEvents(data);
       setServerState(data);
       setEvents(sharedEvents);
       setTransactions(data.transactions.map((item)=>({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner})));
@@ -837,8 +840,7 @@ export default function Home() {
       });
       setProtectedMode(Boolean(data.protected));
       setLocked(false);
-      if (key) sessionStorage.setItem("family-key", key);
-      void loadGowalterPrompt(key);
+      void loadGowalterPrompt();
       return true;
     } catch {
       return false;
@@ -846,31 +848,30 @@ export default function Home() {
   }
 
   function authHeaders(json = false) {
-    const headers: Record<string,string> = { "x-app-key": sessionStorage.getItem("family-key") || "" };
+    const headers: Record<string,string> = { "x-moa-request": "1" };
     if (json) headers["content-type"] = "application/json";
     return headers;
   }
 
   async function login() {
-    const response = await fetch("/backend/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({owner:loginOwner,password:accessKey})});
+    const response = await fetch("/backend/auth/login",{method:"POST",headers:authHeaders(true),body:JSON.stringify({owner:loginOwner,password:accessKey})});
     const result = await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(result.detail||"로그인하지 못했습니다.");
-    sessionStorage.setItem("family-key",result.token);
-    const loaded = await loadState(result.token);
+    const loaded = await loadState();
     if(!loaded)throw new Error("로그인 정보를 확인하지 못했습니다.");
     setAccessKey("");
   }
 
-  function logout() {
-    sessionStorage.removeItem("family-key");
+  async function logout() {
+    await fetch("/backend/auth/logout",{method:"POST",headers:authHeaders()}).catch(()=>null);
     setServerState(null);
     setTab("summary");
     setLocked(true);
   }
 
-  async function loadGowalterPrompt(key: string) {
+  async function loadGowalterPrompt() {
     try {
-      const response = await fetch("/backend/ai/prompt",{headers:{"x-app-key":key},cache:"no-store"});
+      const response = await fetch("/backend/ai/prompt",{cache:"no-store"});
       if(response.ok)setGowalterPrompt(await response.json() as GowalterPrompt);
     } catch {
       // 기본 AI 분석은 프롬프트 미리보기가 없어도 계속 사용할 수 있습니다.
@@ -887,7 +888,7 @@ export default function Home() {
       const response = await fetch(`/backend/import?owner=${encodeURIComponent(owner)}`,{method:"POST",headers:authHeaders(),body:form});
       const result = await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"업로드 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setImportStatus({label:file.name,importedAt:new Date().toISOString(),transactionCount:result.transactions_read||0,holdingCount:result.holdings_updated||0});
       setToast(`가계부 ${result.transactions_added}건 추가 · 투자상품 ${result.holdings_updated}개 갱신`);
     } catch (error) {
@@ -907,7 +908,7 @@ export default function Home() {
       const response=await fetch("/backend/market/refresh",{method:"POST",headers:authHeaders()});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"갱신 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast(`현재가 ${result.updated}개 갱신 · 티커 ${result.tickers_resolved}개 확인`);
     } catch(error){setToast(error instanceof Error?error.message:"현재가를 갱신하지 못했어요.");} finally{setBusy("");}
   }
@@ -918,7 +919,7 @@ export default function Home() {
       const response=await fetch("/backend/ai/analyze",{method:"POST",headers:authHeaders(true),body:JSON.stringify({prompt})});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"분석 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast(`${result.provider==="openai"?"OpenAI":"로컬"} 분석을 누적 저장했어요.`);
     } catch(error){setToast(error instanceof Error?error.message:"AI 분석을 만들지 못했어요.");} finally{setBusy("");}
   }
@@ -929,7 +930,7 @@ export default function Home() {
       const response=await fetch(`/backend/holdings/${id}`,{method:"PATCH",headers:authHeaders(true),body:JSON.stringify(data)});
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.detail||"저장 실패");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setToast("티커와 목표가를 저장했어요.");
     } catch(error){setToast(error instanceof Error?error.message:"종목 설정을 저장하지 못했어요.");} finally{setBusy("");}
   }
@@ -951,7 +952,7 @@ export default function Home() {
       const response = await fetch("/backend/holdings",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
       const result = await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(result.detail||"자산을 등록하지 못했습니다.");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setAssetModalType(null);
       setToast(result.quote_updated?"자산을 등록하고 원화 시세를 반영했어요.":"자산을 등록했어요. 시세 갱신을 다시 눌러 주세요.");
     } catch(error) {
@@ -966,7 +967,7 @@ export default function Home() {
       const response = await fetch("/backend/debts",{method:"POST",headers:authHeaders(true),body:JSON.stringify(payload)});
       const result = await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(result.detail||"부채를 등록하지 못했습니다.");
-      await loadState(sessionStorage.getItem("family-key")||"");
+      await loadState();
       setDebtModal(false);
       setToast("부채를 등록하고 순자산에 반영했어요.");
     } catch(error) {
@@ -1003,7 +1004,7 @@ export default function Home() {
   }
 
   async function addEvent(event: CalendarEvent) {
-    const response = await fetch("/api/calendar", { method:"POST", headers:{"content-type":"application/json","x-app-key":sessionStorage.getItem("family-key")||""}, body:JSON.stringify(event) }).catch(()=>null);
+    const response = await fetch("/api/calendar", { method:"POST", headers:authHeaders(true), body:JSON.stringify(event) }).catch(()=>null);
     const result = response?.ok ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string } }|null : null;
     const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
     const backendResponse = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(savedEvent)});

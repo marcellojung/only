@@ -11,6 +11,6 @@ if ($Tailscale) {
 }
 if (-not $TailscaleExe) { throw "Tailscale을 찾지 못했습니다." }
 
-& $TailscaleExe serve --bg 3000 | Out-Host
-Write-Host "모아 자산 앱을 시작합니다. 이 창을 닫으면 앱도 종료됩니다."
+& $TailscaleExe funnel --bg 3000 | Out-Host
+Write-Host "모아 자산 앱을 Funnel로 시작합니다. 이 창을 닫으면 앱도 종료됩니다."
 & node.exe scripts/serve.mjs

@@ -28,6 +28,8 @@ _load_env(PROJECT_DIR / ".env.local")
 _load_env(PROJECT_DIR / ".env")
 _load_env(PROJECT_DIR / "backend" / ".env")
 
+PUBLIC_ACCESS_MODE = os.getenv("PUBLIC_ACCESS_MODE", "private").strip().lower()
+
 
 def _data_dir() -> Path:
     raw = os.getenv("APP_DATA_DIR", "").strip()
@@ -41,8 +43,9 @@ class Settings:
     project_dir: Path = PROJECT_DIR
     data_dir: Path = _data_dir()
     access_key: str = os.getenv("APP_ACCESS_KEY", "")
-    auth_secret: str = os.getenv("AUTH_SECRET", "") or os.getenv("APP_ACCESS_KEY", "") or os.getenv("ADMIN_PASSWORD", "") or os.getenv("JIWOO_GUEST_PASSWORD", "") or os.getenv("YOONJAE_GUEST_PASSWORD", "") or "moa-local-development"
-    admin_password: str = os.getenv("ADMIN_PASSWORD", "") or os.getenv("APP_ACCESS_KEY", "")
+    public_access_mode: str = PUBLIC_ACCESS_MODE
+    auth_secret: str = os.getenv("AUTH_SECRET", "") or ("" if PUBLIC_ACCESS_MODE == "funnel" else os.getenv("APP_ACCESS_KEY", "") or os.getenv("ADMIN_PASSWORD", "") or os.getenv("JIWOO_GUEST_PASSWORD", "") or os.getenv("YOONJAE_GUEST_PASSWORD", "") or "moa-local-development")
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "") or ("" if PUBLIC_ACCESS_MODE == "funnel" else os.getenv("APP_ACCESS_KEY", ""))
     jiwoo_guest_password: str = os.getenv("JIWOO_GUEST_PASSWORD", "")
     yoonjae_guest_password: str = os.getenv("YOONJAE_GUEST_PASSWORD", "")
     backend_url: str = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
@@ -59,6 +62,23 @@ class Settings:
     google_service_account_email: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
     auto_refresh_enabled: bool = os.getenv("AUTO_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     auto_refresh_times: str = os.getenv("AUTO_REFRESH_TIMES", "09:00,13:00,17:00,21:00")
+
+    def validate_security(self) -> None:
+        if self.public_access_mode != "funnel":
+            return
+        secrets = {
+            "AUTH_SECRET": self.auth_secret,
+            "ADMIN_PASSWORD": self.admin_password,
+            "JIWOO_GUEST_PASSWORD": self.jiwoo_guest_password,
+            "YOONJAE_GUEST_PASSWORD": self.yoonjae_guest_password,
+        }
+        too_short = [name for name, value in secrets.items() if len(value) < (32 if name == "AUTH_SECRET" else 12)]
+        placeholders = [name for name, value in secrets.items() if "change-this" in value.lower()]
+        if too_short or placeholders:
+            invalid = ", ".join(sorted(set(too_short + placeholders)))
+            raise RuntimeError(f"Funnel 공개 운영에 필요한 보안 환경 변수를 확인하세요: {invalid}")
+        if len(set(secrets.values())) != len(secrets):
+            raise RuntimeError("Funnel 공개 운영에서는 AUTH_SECRET과 가족별 비밀번호를 서로 다르게 설정해야 합니다.")
 
     @property
     def database_url(self) -> str:

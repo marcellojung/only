@@ -15,9 +15,9 @@ pnpm dev:full
 
 `dev:full`은 Next.js 웹 화면(3000번)과 FastAPI 자산 API(8000번)를 함께 실행합니다. 브라우저에서 `http://localhost:3000`을 엽니다.
 
-### Windows PC에서 무료 비공개 운영
+### Windows PC에서 가족용 Funnel 운영
 
-Windows PC를 계속 켜둘 수 있다면 Tailscale Serve가 가장 간단합니다. 외부 포트를 개방하지 않고 가족의 Tailscale 기기에서만 HTTPS 주소로 접속합니다. 최초 설치, 자동 실행 등록과 아이폰 연결 방법은 [WINDOWS_HOSTING.md](./WINDOWS_HOSTING.md)를 따르세요.
+Windows PC를 계속 켜둘 수 있다면 Tailscale Funnel로 별도 도메인과 공유기 포트 개방 없이 HTTPS 주소를 만들 수 있습니다. Tailscale은 서버 PC에만 필요하고 가족 아이폰에는 설치하지 않습니다. 가족별 로그인 보안, 최초 설치와 자동 실행 방법은 [WINDOWS_HOSTING.md](./WINDOWS_HOSTING.md)를 따르세요.
 
 ### 같은 와이파이의 아이폰에서 열기
 
@@ -29,7 +29,8 @@ Windows PC를 계속 켜둘 수 있다면 Tailscale Serve가 가장 간단합니
 
 데이터는 `data/family-assets.db` SQLite 파일에 저장됩니다. 뱅크샐러드 업로드, 자산 스냅샷, 시세·환율, AI 분석, 목표가 알림 결과가 누적되며 같은 거래는 중복 저장하지 않습니다. 외부에서 두 아이폰으로 접속할 때는 Next.js와 FastAPI를 함께 실행하고 HTTPS 리버스 프록시 또는 비공개 터널을 사용하세요.
 
-- `APP_ACCESS_KEY`: 기존 관리자 접근 키. `ADMIN_PASSWORD`를 비우면 성근 관리자 비밀번호로도 사용
+- `PUBLIC_ACCESS_MODE`: Funnel 공개 운영은 `funnel`; 공개 모드에서는 기존 `APP_ACCESS_KEY` 우회 로그인을 차단
+- `APP_ACCESS_KEY`: 비공개 이전 설치 호환용 접근 키. Funnel 모드에서는 사용하지 않음
 - `AUTH_SECRET`: 로그인 세션 서명용 긴 임의 문자열. 비밀번호와 다른 값을 사용
 - `ADMIN_PASSWORD`: 성근 관리자 비밀번호
 - `JIWOO_GUEST_PASSWORD`, `YOONJAE_GUEST_PASSWORD`: 지우·윤재 게스트 비밀번호
@@ -42,7 +43,7 @@ Windows PC를 계속 켜둘 수 있다면 Tailscale Serve가 가장 간단합니
 
 성근 계정은 전체 가족 자산·일정을 보고 등록·수정할 수 있는 관리자입니다. 지우·윤재 계정은 각자 소유로 등록된 주식/ETF를 포함한 자산과 일정만 조회하는 게스트입니다. 게스트 계정은 해당 비밀번호를 설정해야 활성화됩니다.
 
-SQLite 파일과 `.env.local`은 Git에서 제외됩니다. 인터넷에 공개할 때는 반드시 HTTPS를 사용하고 `AUTH_SECRET`과 세 계정 비밀번호를 설정하세요.
+SQLite 파일과 `.env.local`은 Git에서 제외됩니다. Funnel 모드는 `AUTH_SECRET` 32자 이상과 서로 다른 가족 비밀번호 12자 이상이 아니면 서버 시작을 차단합니다. 로그인 세션은 HttpOnly·SameSite 쿠키로 저장하고, 연속 로그인 실패는 일정 시간 제한합니다.
 
 아이폰 Safari에서 배포 주소를 연 뒤 **공유 → 홈 화면에 추가 → 웹 앱으로 열기**를 선택하면 일반 앱처럼 실행됩니다.
 

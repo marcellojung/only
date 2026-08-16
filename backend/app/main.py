@@ -6,14 +6,15 @@ from contextlib import asynccontextmanager
 from datetime import date
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .ai import analyze_portfolio, portfolio_prompt
-from .auth import Viewer, authenticate, current_user, issue_token, require_admin
+from .auth import Viewer, authenticate, current_user, issue_token, login_rate_limiter, require_admin
+from .config import settings
 from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
 from .importer import import_upload
@@ -29,6 +30,7 @@ from .telegram import send_telegram_message
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    settings.validate_security()
     init_db()
     scheduler_task = start_auto_refresh()
     try:
@@ -103,10 +105,20 @@ def health(db: Session = Depends(get_db)) -> dict[str, object]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginPayload) -> dict[str, object]:
+def login(payload: LoginPayload, x_client_ip: str = Header(default="unknown", max_length=80)) -> dict[str, object]:
+    client_id = x_client_ip.strip() or "unknown"
+    retry_after = login_rate_limiter.retry_after(client_id)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail=f"로그인 시도가 너무 많습니다. {max(1, retry_after // 60)}분 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
     viewer = authenticate(payload.owner.strip(), payload.password)
     if not viewer:
+        login_rate_limiter.record_failure(client_id)
         raise HTTPException(status_code=401, detail="이름 또는 비밀번호가 맞지 않습니다.")
+    login_rate_limiter.record_success(client_id)
     return {"token": issue_token(viewer), "viewer": {"owner": viewer.owner, "role": viewer.role}}
 
 
