@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 type TabId =
   | "summary"
@@ -20,6 +20,7 @@ type Transaction = {
   amount: number;
   kind: "expense" | "income";
   owner: "성근" | "지우" | "윤재" | "공통";
+  paymentMethod?: string;
 };
 
 type Portfolio = {
@@ -131,7 +132,9 @@ type ServerState = {
     category: string;
     amount: number;
     owner: "성근" | "지우" | "윤재" | "공통";
+    payment_method?:string;
   }>;
+  transaction_count:number;
   holdings: HoldingData[];
   debts: DebtData[];
   events: CalendarEvent[];
@@ -149,6 +152,8 @@ type CalendarEvent = {
   owner: "공통" | "성근" | "지우" | "윤재";
   color?: string;
   googleEventId?: string;
+  source?:"app"|"google";
+  htmlLink?:string;
 };
 
 type CalendarConnectionStatus = {
@@ -236,6 +241,7 @@ const initialPortfolio: Portfolio = {
 };
 
 const money = (value: number) => new Intl.NumberFormat("ko-KR").format(value);
+const toTransaction = (item:ServerState["transactions"][number]):Transaction => ({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner,paymentMethod:item.payment_method});
 const compactMoney = (value: number) => {
   if (value >= 100000000) {
     const eok = Math.floor(value / 100000000);
@@ -418,10 +424,20 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
 
 function StockReportModal({ item, report, loading, error, onClose }: { item: HoldingData; report: StockReport | null; loading: boolean; error: string; onClose:()=>void }) {
   const [copiedPrompt,setCopiedPrompt] = useState("");
+  const [copyMessage,setCopyMessage] = useState("");
   async function copyPrompt(id:string,text:string) {
-    await navigator.clipboard.writeText(text);
-    setCopiedPrompt(id);
-    window.setTimeout(()=>setCopiedPrompt(""),1800);
+    let copied=false;
+    try {
+      if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}
+    } catch { copied=false; }
+    if(!copied){
+      const textarea=document.createElement("textarea");
+      textarea.value=text;textarea.readOnly=true;textarea.style.position="fixed";textarea.style.top="0";textarea.style.left="-9999px";textarea.style.fontSize="16px";
+      document.body.appendChild(textarea);textarea.focus({preventScroll:true});textarea.select();textarea.setSelectionRange(0,text.length);
+      copied=document.execCommand("copy");textarea.remove();
+    }
+    if(copied){setCopiedPrompt(id);setCopyMessage("프롬프트 전체를 클립보드에 복사했어요.");window.setTimeout(()=>{setCopiedPrompt("");setCopyMessage("")},1800);}
+    else setCopyMessage("복사할 수 없어요. 아래 내용을 길게 눌러 직접 선택해 주세요.");
   }
   return <div className="modal-backdrop report-backdrop" onMouseDown={onClose}><article className="stock-report-modal" onMouseDown={(event)=>event.stopPropagation()}>
     <header className="report-head"><div><span className="eyebrow">종목 상세 · {item.ticker||"티커 미설정"}</span><h2>{item.name}</h2><p>OpenDART 자체 분석, 최신 뉴스와 증권사 리서치를 한곳에서 확인합니다.</p></div><button onClick={onClose} aria-label="닫기">×</button></header>
@@ -433,7 +449,7 @@ function StockReportModal({ item, report, loading, error, onClose }: { item: Hol
       </section>
       <section className="report-section"><div className="report-title"><div><span className="eyebrow">{report.news.provider}</span><h3>최근 종목 뉴스</h3></div></div><p className={`report-notice ${report.news.items.length?"ready":""}`}>{report.news.message}</p><div className="news-list">{report.news.items.map((news)=><a key={`${news.url}-${news.published_at}`} href={news.url} target="_blank" rel="noreferrer"><div><time>{news.published_at.slice(0,10)||"날짜 미상"}</time><b>{news.title}</b><p>{news.summary}</p></div><span>↗</span></a>)}</div></section>
       <section className="report-section"><div className="report-title"><div><span className="eyebrow">External research</span><h3>증권사 리포트 검색</h3></div></div><div className="research-links">{report.broker_research.length?report.broker_research.map((link)=><a key={`${link.provider}-${link.kind}`} href={link.url} target="_blank" rel="noreferrer"><span>{link.provider.slice(0,2)}</span><div><b>{link.title}</b><small>{link.description}</small></div><i>↗</i></a>):<p className="report-notice">국내 6자리 종목코드를 설정하면 검색할 수 있습니다.</p>}</div></section>
-      <section className="report-section"><div className="report-title"><div><span className="eyebrow">Copy & analyze</span><h3>종목분석 프롬프트</h3></div></div><div className="prompt-list">{report.prompts.map((prompt)=><details key={prompt.id} className="prompt-card"><summary><div><b>{prompt.title}</b><small>{prompt.description}</small></div><span>펼쳐보기⌄</span></summary><div className="prompt-content"><button onClick={()=>void copyPrompt(prompt.id,prompt.text)}>{copiedPrompt===prompt.id?"✓ 복사됨":"프롬프트 복사"}</button><pre>{prompt.text}</pre></div></details>)}</div></section>
+      <section className="report-section"><div className="report-title"><div><span className="eyebrow">Copy & analyze</span><h3>종목분석 프롬프트</h3></div></div><div className="prompt-list">{report.prompts.map((prompt)=><details key={prompt.id} className="prompt-card"><summary><div><b>{prompt.title}</b><small>{prompt.description}</small></div><span>펼쳐보기⌄</span></summary><div className="prompt-content"><button type="button" onClick={()=>void copyPrompt(prompt.id,prompt.text)}>{copiedPrompt===prompt.id?"✓ 복사됨":"프롬프트 복사"}</button><pre>{prompt.text}</pre><button type="button" onClick={()=>void copyPrompt(prompt.id,prompt.text)}>{copiedPrompt===prompt.id?"✓ 복사됨":"전체 복사"}</button></div></details>)}</div>{copyMessage&&<p className={`copy-status ${copiedPrompt?"success":"error"}`} role="status">{copyMessage}</p>}</section>
       {!!report.dart.disclosures.length&&<section className="report-section"><div className="report-title"><div><span className="eyebrow">최근 1년</span><h3>주요 공시</h3></div></div><div className="disclosure-list">{report.dart.disclosures.map((item)=><a key={`${item.date}-${item.url}`} href={item.url} target="_blank" rel="noreferrer"><time>{item.date.replace(/(\d{4})(\d{2})(\d{2})/,"$1.$2.$3")}</time><b>{item.title}</b><span>↗</span></a>)}</div></section>}
     </div>}
   </article></div>;
@@ -544,8 +560,35 @@ function RealEstate({ hidden, readOnly, assetHidden, onToggleHidden, onAddDebt, 
   );
 }
 
-function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transactions: Transaction[]; onImport: (files: FileList | null) => void }) {
+function TransactionCalendar({hidden,transactions,initialMonth}:{hidden:boolean;transactions:Transaction[];initialMonth:string}) {
+  const [cursor,setCursor]=useState(()=>new Date(`${initialMonth}-01T12:00:00`));
+  const [selectedDate,setSelectedDate]=useState("");
+  const year=cursor.getFullYear();
+  const month=cursor.getMonth();
+  const monthKey=`${year}-${String(month+1).padStart(2,"0")}`;
+  const firstDay=new Date(year,month,1).getDay();
+  const days=new Date(year,month+1,0).getDate();
+  const cells=Array.from({length:firstDay+days},(_,index)=>index<firstDay?null:index-firstDay+1);
+  const expenses=transactions.filter((item)=>item.date.startsWith(monthKey)&&item.kind==="expense");
+  const daily=new Map<string,{total:number;count:number}>();
+  for(const item of expenses){const value=daily.get(item.date)||{total:0,count:0};daily.set(item.date,{total:value.total+item.amount,count:value.count+1});}
+  const selectedItems=selectedDate?expenses.filter((item)=>item.date===selectedDate):[];
+  const shownItems=selectedDate?selectedItems:expenses;
+  return <div className="payment-calendar-wrap">
+    <div className="calendar-toolbar payment-calendar-toolbar"><button type="button" onClick={()=>{setCursor(new Date(year,month-1,1));setSelectedDate("")}} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button type="button" onClick={()=>{setCursor(new Date(year,month+1,1));setSelectedDate("")}} aria-label="다음 달">›</button><button type="button" className="today-button" onClick={()=>{setCursor(new Date());setSelectedDate("")}}>오늘</button></div>
+    <article className="calendar-card payment-calendar"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
+      if(!day)return <div className="empty" key={index}/>;
+      const dateKey=`${monthKey}-${String(day).padStart(2,"0")}`;const summary=daily.get(dateKey);
+      return <div key={dateKey}><button type="button" className={selectedDate===dateKey?"selected":""} onClick={()=>setSelectedDate(dateKey)} aria-label={`${dateKey}${summary?`, 결제 ${summary.count}건`:""}`}><span>{day}</span>{summary&&<><i className="payment-dot"/><small><Amount hidden={hidden}>{summary.total>=10000?`${Math.round(summary.total/10000)}만`:money(summary.total)}</Amount></small></>}</button></div>;
+    })}</div></article>
+    <div className="payment-calendar-summary"><div><span className="eyebrow">{selectedDate?selectedDate.replaceAll("-","."):`${month+1}월 전체`}</span><h3>결제 {shownItems.length}건</h3></div><strong><Amount hidden={hidden}>{money(shownItems.reduce((sum,item)=>sum+item.amount,0))}원</Amount></strong></div>
+    {selectedDate&&<div className="transaction-list calendar-transactions">{selectedItems.length?selectedItems.map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.category==="식비"?"○":item.category==="교통"?"↗":"◇"}</span><div><b>{item.merchant}</b><small>{item.category} · {item.paymentMethod||item.owner}</small></div><strong><Amount hidden={hidden}>-{money(item.amount)}원</Amount></strong></article>):<p className="empty-payment-day">이날의 결제 내역이 없어요.</p>}</div>}
+  </div>;
+}
+
+function Ledger({ hidden, transactions, allTransactionsLoaded, loadingTransactions, onImport, onLoadAll }: { hidden: boolean; transactions: Transaction[]; allTransactionsLoaded:boolean; loadingTransactions:boolean; onImport: (files: FileList | null) => void; onLoadAll:()=>Promise<boolean> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [view,setView]=useState<"recent"|"all"|"calendar">("recent");
   const latestMonth = transactions.map((item)=>item.date.slice(0,7)).sort().at(-1) || "2026-08";
   const monthItems = transactions.filter((item)=>item.date.startsWith(latestMonth));
   const expenses = monthItems.filter((item)=>item.kind !== "income");
@@ -563,29 +606,36 @@ function Ledger({ hidden, transactions, onImport }: { hidden: boolean; transacti
     chartCursor += percentage(value,total);
     return `${chartColors[index]} ${start}% ${chartCursor}%`;
   }).join(",");
+  async function changeView(next:"recent"|"all"|"calendar") {
+    if(next!=="recent"&&!allTransactionsLoaded&&!(await onLoadAll()))return;
+    setView(next);
+  }
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow={`${latestMonth.slice(0,4)}년 ${Number(latestMonth.slice(5))}월`} title="이번 달 생활비" copy="뱅크샐러드 내역에서 이체를 제외하고 지출과 수입을 정리했어요." />
       <div className="upload-row"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 카드·뱅크샐러드 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{ onImport(event.target.files); event.target.value = ""; }} /><button className="icon-button" aria-label="자동 분류 새로고침">↻</button></div>
       <div className="metric-grid ledger-metrics"><article className="metric-card wide"><p>총 지출</p><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong><small>이체 제외 · {expenses.length}건</small></article><article className="metric-card"><p>일 평균</p><strong><Amount hidden={hidden}>{compactMoney(total/elapsedDays)}</Amount></strong><small>{elapsedDays}일 기준</small></article><article className="metric-card"><p>총 수입</p><strong><Amount hidden={hidden}>{compactMoney(income)}</Amount></strong><small>{monthItems.filter((item)=>item.kind==="income").length}건</small></article></div>
       <article className="panel spending-panel"><div className="panel-head"><div><span className="eyebrow">항목별 지출</span><h2>어디에 썼을까요?</h2></div><span className="chip">{Number(latestMonth.slice(5))}월</span></div><div className="spending-chart"><div className="donut expense-donut" style={{background:chartStops ? `conic-gradient(${chartStops})` : undefined}}><div><small>합계</small><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong></div></div><div className="expense-legend">{categoryRows.map(([category,value],index)=><span key={category}><i className="dot" style={{background:chartColors[index]}}/>{category} <b>{percentage(value,total).toFixed(0)}%</b></span>)}</div></div></article>
-      <div className="section-title-row"><div><span className="eyebrow">최근 내역</span><h2>결제 내역</h2></div><button className="text-button">전체보기</button></div>
-      <div className="transaction-list">{transactions.slice(0,8).map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.kind === "income" ? "+" : item.category === "식비" ? "○" : item.category === "교통" ? "↗" : "◇"}</span><div><b>{item.merchant}</b><small>{item.date.slice(5).replace("-",".")} · {item.category} · {item.owner}</small></div><strong className={item.kind === "income" ? "positive" : ""}><Amount hidden={hidden}>{item.kind === "income" ? "+" : "-"}{money(item.amount)}원</Amount></strong></article>)}</div>
+      <div className="section-title-row"><div><span className="eyebrow">{view==="recent"?"최근 내역":view==="all"?"전체 내역":"월별 보기"}</span><h2>결제 내역</h2></div><div className="ledger-view-actions"><button type="button" className={`text-button ${view==="calendar"?"active":""}`} disabled={loadingTransactions} onClick={()=>void changeView(view==="calendar"?"recent":"calendar")}><Icon name="calendar"/>{view==="calendar"?"목록보기":"캘린더"}</button><button type="button" className="text-button" disabled={loadingTransactions} onClick={()=>void changeView(view==="all"?"recent":"all")}>{loadingTransactions?"불러오는 중…":view==="all"?"접기":"전체보기"}</button></div></div>
+      {view==="calendar"?<TransactionCalendar hidden={hidden} transactions={transactions} initialMonth={latestMonth}/>:<div className="transaction-list">{(view==="all"?transactions:transactions.slice(0,8)).map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.kind === "income" ? "+" : item.category === "식비" ? "○" : item.category === "교통" ? "↗" : "◇"}</span><div><b>{item.merchant}</b><small>{item.date.slice(5).replace("-",".")} · {item.category} · {item.paymentMethod||item.owner}</small></div><strong className={item.kind === "income" ? "positive" : ""}><Amount hidden={hidden}>{item.kind === "income" ? "+" : "-"}{money(item.amount)}원</Amount></strong></article>)}</div>}
     </section>
   );
 }
 
-function CalendarScreen({ events, readOnly, status, checking, deletingId, onCheck, onAdd, onDelete }: { events: CalendarEvent[]; readOnly:boolean; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
+function CalendarScreen({ events, transactions, readOnly, status, checking, deletingId, onCheck, onMonthChange, onAdd, onDelete }: { events: CalendarEvent[]; transactions:Transaction[]; readOnly:boolean; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onMonthChange:(year:number,month:number)=>Promise<boolean>; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
   const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
+  useEffect(()=>{if(!readOnly)void onMonthChange(year,month)},[year,month,onMonthChange,readOnly]);
   const firstDay = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
   const cells = Array.from({ length: firstDay + days }, (_, i) => i < firstDay ? null : i - firstDay + 1);
-  const monthEvents = events.filter((event)=>event.date.startsWith(`${year}-${String(month+1).padStart(2,"0")}`));
+  const monthKey=`${year}-${String(month+1).padStart(2,"0")}`;
+  const monthEvents = events.filter((event)=>event.date.startsWith(monthKey)).sort((a,b)=>`${a.date}${a.time||""}`.localeCompare(`${b.date}${b.time||""}`));
+  const monthTransactions=transactions.filter((item)=>item.date.startsWith(monthKey)&&item.kind==="expense");
   return (
     <section className="screen fade-in">
-      <ScreenHeading eyebrow="Google Calendar" title="우리의 공동 일정" copy="서로 추가한 일정이 Google 캘린더와 함께 업데이트돼요." />
+      <ScreenHeading eyebrow="Google Calendar + 가계부" title="우리의 공동 일정" copy="공유 일정과 날짜별 결제 여부를 한 달력에서 함께 확인해요." />
       {!readOnly&&<article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
         <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button>
       </article>}
@@ -594,12 +644,14 @@ function CalendarScreen({ events, readOnly, status, checking, deletingId, onChec
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
         const dayEvents = monthEvents.filter((item)=>item.date===dateKey);
+        const paymentCount=monthTransactions.filter((item)=>item.date===dateKey).length;
         const today = new Date();
         const isToday = year===today.getFullYear() && month===today.getMonth() && day===today.getDate();
-        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" disabled={readOnly} onClick={()=>onAdd(dateKey)} aria-label={readOnly?dateKey:`${dateKey} 일정 추가`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,3).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}</span></button>}</div>
+        return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" disabled={readOnly} onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 ${dayEvents.length}개, 결제 ${paymentCount}건`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,2).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}{!!paymentCount&&<i className="payment-dot" title={`결제 ${paymentCount}건`}/>}</span></button>}</div>
       })}</div></article>
       <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div>{!readOnly&&<button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button>}</div>
       <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">{readOnly?"등록된 내 일정이 없습니다.":"날짜를 눌러 가족 일정을 추가해 보세요."}</div>}</div>
+      <div className="calendar-legend"><span><i className="event-dot mint"/>일정</span><span><i className="payment-dot"/>결제 발생일 ({monthTransactions.length}건)</span></div>
       {!readOnly&&<a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>}
     </section>
   );
@@ -743,6 +795,8 @@ export default function Home() {
   const [tab, setTab] = useState<TabId>("summary");
   const [hidden, setHidden] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
+  const [allTransactionsLoaded,setAllTransactionsLoaded]=useState(false);
+  const [loadingTransactions,setLoadingTransactions]=useState(false);
   const [portfolio, setPortfolio] = useState<Portfolio>(initialPortfolio);
   const [serverState, setServerState] = useState<ServerState | null>(null);
   const [gowalterPrompt, setGowalterPrompt] = useState<GowalterPrompt | null>(null);
@@ -767,20 +821,6 @@ export default function Home() {
   const [stockReport,setStockReport] = useState<StockReport|null>(null);
   const [reportLoading,setReportLoading] = useState(false);
   const [reportError,setReportError] = useState("");
-
-  useEffect(() => {
-    sessionStorage.removeItem("family-key");
-    void loadState();
-    const savedHidden = localStorage.getItem("moa-hidden-assets");
-    if (savedHidden) {
-      try {
-        const parsed = JSON.parse(savedHidden) as string[];
-        window.setTimeout(()=>setHiddenAssetKeys(parsed),0);
-      } catch { localStorage.removeItem("moa-hidden-assets"); }
-    }
-    // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
-  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -822,7 +862,8 @@ export default function Home() {
       const sharedEvents = await migrateStoredEvents(data);
       setServerState(data);
       setEvents(sharedEvents);
-      setTransactions(data.transactions.map((item)=>({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner})));
+      setTransactions(data.transactions.map(toTransaction));
+      setAllTransactionsLoaded(data.transactions.length >= (data.transaction_count||data.transactions.length));
       const summary = data.summary;
       const known = summary.real_estate_value + summary.investment_value + summary.cash_value;
       setPortfolio({
@@ -847,11 +888,62 @@ export default function Home() {
     }
   }
 
+  useEffect(() => {
+    sessionStorage.removeItem("family-key");
+    const stateTimer=window.setTimeout(()=>void loadState(),0);
+    const savedHidden = localStorage.getItem("moa-hidden-assets");
+    if (savedHidden) {
+      try {
+        const parsed = JSON.parse(savedHidden) as string[];
+        window.setTimeout(()=>setHiddenAssetKeys(parsed),0);
+      } catch { localStorage.removeItem("moa-hidden-assets"); }
+    }
+    return ()=>window.clearTimeout(stateTimer);
+    // 첫 진입에서 서버 보호 여부와 저장된 데이터를 한 번만 확인합니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 로그인 키 확인은 첫 진입에서 한 번만 실행합니다.
+  }, []);
+
   function authHeaders(json = false) {
     const headers: Record<string,string> = { "x-moa-request": "1" };
     if (json) headers["content-type"] = "application/json";
     return headers;
   }
+
+  const loadAllTransactions=useCallback(async()=>{
+    if(allTransactionsLoaded)return true;
+    setLoadingTransactions(true);
+    try {
+      const all:Transaction[]=[];let offset=0;let hasMore=true;
+      while(hasMore){
+        const response=await fetch(`/backend/transactions?offset=${offset}&limit=10000`,{headers:{"x-moa-request":"1"},cache:"no-store"});
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok||!Array.isArray(result.items))throw new Error(result.detail||"전체 결제 내역을 불러오지 못했습니다.");
+        all.push(...(result.items as ServerState["transactions"]).map(toTransaction));offset+=result.items.length;hasMore=Boolean(result.has_more)&&result.items.length>0;
+      }
+      setTransactions(all);setAllTransactionsLoaded(true);return true;
+    } catch(error){setToast(error instanceof Error?error.message:"전체 결제 내역을 불러오지 못했습니다.");return false;}
+    finally{setLoadingTransactions(false);}
+  },[allTransactionsLoaded]);
+
+  const loadCalendarMonth=useCallback(async(year:number,month:number)=>{
+    const timeMin=new Date(Date.UTC(year,month,1)).toISOString();
+    const timeMax=new Date(Date.UTC(year,month+1,1)).toISOString();
+    const monthKey=`${year}-${String(month+1).padStart(2,"0")}`;
+    try{
+      const response=await fetch(`/api/calendar?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`,{headers:{"x-moa-request":"1"},cache:"no-store"});
+      const result=await response.json().catch(()=>({})) as CalendarConnectionStatus&{events?:CalendarEvent[];error?:string};
+      if(!response.ok)throw new Error(result.error||result.message||"Google 일정을 불러오지 못했습니다.");
+      setCalendarStatus(result);
+      if(!result.connected)return false;
+      const googleEvents=Array.isArray(result.events)?result.events:[];
+      setEvents((current)=>{
+        const preserved=current.filter((event)=>event.source!=="google"||!event.date.startsWith(monthKey));
+        const appGoogleIds=new Set(preserved.filter((event)=>event.source!=="google").map((event)=>event.googleEventId).filter(Boolean));
+        return [...preserved,...googleEvents.filter((event)=>!appGoogleIds.has(event.googleEventId))].sort((a,b)=>`${a.date}${a.time||""}`.localeCompare(`${b.date}${b.time||""}`));
+      });
+      return true;
+    }catch(error){setCalendarStatus({configured:true,connected:false,message:error instanceof Error?error.message:"Google Calendar 연결 실패"});return false;}
+  },[]);
 
   async function login() {
     const response = await fetch("/backend/auth/login",{method:"POST",headers:authHeaders(true),body:JSON.stringify({owner:loginOwner,password:accessKey})});
@@ -1005,7 +1097,7 @@ export default function Home() {
 
   async function addEvent(event: CalendarEvent) {
     const response = await fetch("/api/calendar", { method:"POST", headers:authHeaders(true), body:JSON.stringify(event) }).catch(()=>null);
-    const result = response?.ok ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string } }|null : null;
+    const result = response ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string };error?:string }|null : null;
     const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
     const backendResponse = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(savedEvent)});
     const backendResult = await backendResponse.json().catch(()=>({}));
@@ -1015,7 +1107,9 @@ export default function Home() {
     }
     setEvents((current)=>[...current,backendResult.event as CalendarEvent].sort((a,b)=>a.date.localeCompare(b.date)));
     setModal(false);
-    setToast(result?.configured ? "공유 Google 캘린더에 추가했어요." : "일정을 앱에만 저장했어요. Google 연동 후 새로 등록하면 함께 저장됩니다.");
+    if(response?.ok&&result?.configured)setToast("공유 Google 캘린더에 추가했어요.");
+    else if(result?.error)setToast(`일정은 앱에 저장했지만 Google 동기화 실패: ${result.error}`);
+    else setToast("일정을 앱에만 저장했어요. Google 연동 설정을 확인해 주세요.");
   }
 
   async function deleteEvent(event:CalendarEvent) {
@@ -1027,9 +1121,11 @@ export default function Home() {
         const result = await response.json().catch(()=>({}));
         if(!response.ok || !result.deleted)throw new Error(result.error||"Google Calendar에서 일정을 삭제하지 못했습니다.");
       }
-      const backendResponse = await fetch(`/backend/events/${encodeURIComponent(event.id)}`,{method:"DELETE",headers:authHeaders()});
-      const backendResult = await backendResponse.json().catch(()=>({}));
-      if(!backendResponse.ok || !backendResult.deleted)throw new Error(backendResult.detail||"공용 일정에서 삭제하지 못했습니다.");
+      if(event.source!=="google"){
+        const backendResponse = await fetch(`/backend/events/${encodeURIComponent(event.id)}`,{method:"DELETE",headers:authHeaders()});
+        const backendResult = await backendResponse.json().catch(()=>({}));
+        if(!backendResponse.ok || !backendResult.deleted)throw new Error(backendResult.detail||"공용 일정에서 삭제하지 못했습니다.");
+      }
       setEvents((current)=>current.filter((item)=>item.id!==event.id));
       setToast(event.googleEventId?"앱과 Google Calendar에서 일정을 삭제했어요.":"앱에서 일정을 삭제했어요.");
     } catch(error) {
@@ -1041,8 +1137,8 @@ export default function Home() {
     setBusy("calendar");
     try {
       const response = await fetch("/api/calendar",{headers:authHeaders(),cache:"no-store"});
-      const result = await response.json().catch(()=>({message:"연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus;
-      if(!response.ok)throw new Error(result.message||"연결 확인 실패");
+      const result = await response.json().catch(()=>({message:"연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus&{error?:string};
+      if(!response.ok)throw new Error(result.error||result.message||"연결 확인 실패");
       setCalendarStatus(result);
       setToast(result.connected?"Google Calendar 연결을 확인했어요.":result.message);
     } catch(error) {
@@ -1093,10 +1189,10 @@ export default function Home() {
         {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} readOnly={!isAdmin} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
         {tab === "stocks" && <Stocks hidden={hidden} readOnly={!isAdmin} ownerFilter={stockOwnerFilter} onOwnerFilter={setStockOwnerFilter} holdings={displayedStockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
-        {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} onImport={importFile} />}
+        {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} allTransactionsLoaded={allTransactionsLoaded} loadingTransactions={loadingTransactions} onImport={importFile} onLoadAll={loadAllTransactions} />}
         {tab === "crypto" && <Crypto hidden={hidden} readOnly={!isAdmin} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} readOnly={!isAdmin} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
-        {tab === "calendar" && <CalendarScreen events={visibleEvents} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
+        {tab === "calendar" && <CalendarScreen events={visibleEvents} transactions={transactions} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onMonthChange={loadCalendarMonth} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 

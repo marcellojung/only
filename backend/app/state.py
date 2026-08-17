@@ -21,6 +21,23 @@ def _iso(value: datetime | date | None) -> str:
     return value.isoformat() if value else ""
 
 
+def serialize_transaction(item: Transaction) -> dict[str, object]:
+    return {
+        "id": str(item.id),
+        "date": _iso(item.transaction_date),
+        "time": item.transaction_time,
+        "type": item.transaction_type,
+        "merchant": item.merchant,
+        "category": item.primary_category,
+        "subcategory": item.secondary_category,
+        "amount": item.amount,
+        "signed_amount": item.signed_amount,
+        "currency": item.currency,
+        "payment_method": item.payment_method,
+        "owner": item.owner,
+    }
+
+
 def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object]]:
     last_import = db.scalar(select(ImportBatch).order_by(ImportBatch.imported_at.desc()))
     last_fx = latest_exchange_rate(db)
@@ -85,9 +102,9 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "last_checked_at": _iso(last_alert.created_at) if last_alert else "",
         },
         "google_calendar": {
-            "configured": bool(settings.google_calendar_id and settings.google_service_account_email),
-            "connected": bool(settings.google_calendar_id and settings.google_service_account_email),
-            "message": "설정됨" if settings.google_calendar_id and settings.google_service_account_email else "설정 필요",
+            "configured": bool(settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key),
+            "connected": False,
+            "message": "앱에서 연결 확인 필요" if settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key else "설정 필요",
         },
     }
 
@@ -138,6 +155,10 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
     holdings = list(db.scalars(holding_query.order_by(Holding.market_value.desc())))
     debts = list(db.scalars(debt_query.order_by(Debt.balance.desc())))
     transactions = list(db.scalars(transaction_query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc()).limit(200)))
+    transaction_count_query = select(func.count(Transaction.id))
+    if owner:
+        transaction_count_query = transaction_count_query.where(Transaction.owner == owner)
+    transaction_count = db.scalar(transaction_count_query) or 0
     events = list(db.scalars(event_query.order_by(FamilyEvent.event_date, FamilyEvent.event_time, FamilyEvent.id)))
     snapshots = list(
         db.scalars(select(PortfolioSnapshot).order_by(PortfolioSnapshot.captured_at.desc()).limit(24))
@@ -163,23 +184,8 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
         "updated_at": _iso(snapshots[0].captured_at) if snapshots else "",
         "summary": summary,
         "members": members,
-        "transactions": [
-            {
-                "id": str(item.id),
-                "date": _iso(item.transaction_date),
-                "time": item.transaction_time,
-                "type": item.transaction_type,
-                "merchant": item.merchant,
-                "category": item.primary_category,
-                "subcategory": item.secondary_category,
-                "amount": item.amount,
-                "signed_amount": item.signed_amount,
-                "currency": item.currency,
-                "payment_method": item.payment_method,
-                "owner": item.owner,
-            }
-            for item in transactions
-        ],
+        "transactions": [serialize_transaction(item) for item in transactions],
+        "transaction_count": transaction_count,
         "holdings": [
             {
                 "id": item.id,
