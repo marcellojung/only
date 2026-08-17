@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .ai import analyze_portfolio, portfolio_prompt
@@ -19,12 +19,12 @@ from .database import engine, get_db, init_db
 from .history import create_portfolio_snapshot
 from .importer import import_upload
 from .market import latest_exchange_rate, normalize_user_symbol, refresh_exchange_rate, refresh_holding_quote, refresh_market
-from .models import AlertEvent, Debt, FamilyEvent, Holding
+from .models import AlertEvent, Debt, FamilyEvent, Holding, Transaction
 from .news import search_company_news
 from .opendart import build_holding_report
 from .prompts import build_stock_prompts
 from .scheduler import start_auto_refresh, stop_auto_refresh
-from .state import build_state, integrations
+from .state import build_state, integrations, serialize_transaction
 from .telegram import send_telegram_message
 
 
@@ -130,6 +130,31 @@ def auth_me(viewer: Viewer = Depends(current_user)) -> dict[str, str]:
 @app.get("/api/state")
 def state(viewer: Viewer = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
     return build_state(db, owner=None if viewer.is_admin else viewer.owner, role=viewer.role)
+
+
+@app.get("/api/transactions")
+def transactions(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=1000, ge=1, le=10000),
+    _viewer: Viewer = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    total = db.scalar(select(func.count(Transaction.id))) or 0
+    items = list(
+        db.scalars(
+            select(Transaction)
+            .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return {
+        "items": [serialize_transaction(item) for item in items],
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @app.post("/api/import", dependencies=[Depends(require_admin)])

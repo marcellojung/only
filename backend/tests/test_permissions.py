@@ -15,7 +15,7 @@ def database() -> Session:
     return Session(engine)
 
 
-def test_guest_state_contains_only_own_assets_and_transactions() -> None:
+def test_guest_state_keeps_assets_private_but_shares_ledger_and_calendar() -> None:
     with database() as db:
         db.add_all(
             [
@@ -36,8 +36,10 @@ def test_guest_state_contains_only_own_assets_and_transactions() -> None:
         assert state["viewer"] == {"owner": "지우", "role": "guest"}
         assert [item["owner"] for item in state["holdings"]] == ["지우"]
         assert [item["owner"] for item in state["debts"]] == ["지우"]
-        assert [item["owner"] for item in state["transactions"]] == ["지우"]
-        assert [item["owner"] for item in state["events"]] == ["지우"]
+        assert {item["owner"] for item in state["transactions"]} == {"성근", "지우"}
+        assert {item["owner"] for item in state["events"]} == {"성근", "지우"}
+        assert state["transaction_count"] == 2
+        assert state["summary"]["monthly_spending"] == 30
         assert state["summary"]["total_assets"] == 500
         assert state["summary"]["total_debts"] == 50
         assert state["history"] == []
