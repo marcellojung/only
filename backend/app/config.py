@@ -48,7 +48,6 @@ class Settings:
     admin_password: str = os.getenv("ADMIN_PASSWORD", "") or ("" if PUBLIC_ACCESS_MODE == "funnel" else os.getenv("APP_ACCESS_KEY", ""))
     jiwoo_guest_password: str = os.getenv("JIWOO_GUEST_PASSWORD", "")
     yoonjae_guest_password: str = os.getenv("YOONJAE_GUEST_PASSWORD", "")
-    backend_url: str = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
     opendart_api_key: str = os.getenv("OPENDART_API_KEY", "")
