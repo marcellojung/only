@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,7 +11,8 @@ from .database import Base
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    # Store naive UTC timestamps for backwards compatibility with existing rows.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ImportBatch(Base):
