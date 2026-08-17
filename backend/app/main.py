@@ -132,10 +132,11 @@ def state(viewer: Viewer = Depends(current_user), db: Session = Depends(get_db))
     return build_state(db, owner=None if viewer.is_admin else viewer.owner, role=viewer.role)
 
 
-@app.get("/api/transactions", dependencies=[Depends(require_admin)])
+@app.get("/api/transactions")
 def transactions(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=1000, ge=1, le=10000),
+    _viewer: Viewer = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     total = db.scalar(select(func.count(Transaction.id))) or 0

@@ -315,7 +315,7 @@ function Summary({ hidden, hiddenRealEstate, readOnly, setTab, portfolio, transa
   return (
     <section className="screen fade-in" aria-label="자산 요약">
       {!readOnly&&<div className="upload-row bank-upload"><select className="owner-select" aria-label="업로드 소유자" value={importOwner} onChange={(event)=>setImportOwner(event.target.value)}><option>성근</option><option>지우</option><option>윤재</option><option>공통</option></select><button className="primary-button" disabled={importing} onClick={()=>inputRef.current?.click()}>{importing ? "파일 반영 중…" : "＋ 뱅크샐러드 통합 파일 불러오기"}</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm" onChange={(event)=>{ onImport(event.target.files,importOwner); event.target.value = ""; }} /><span>같은 내역은 제외하고 자산 이력은 누적해요</span></div>}
-      {readOnly&&<div className="guest-notice">게스트 모드 · 내 자산만 조회할 수 있어요.</div>}
+      {readOnly&&<div className="guest-notice">내 자산은 나에게만 보이고, 가족 가계부와 일정은 모두 함께 봅니다.</div>}
       {importStatus && <div className="import-status" role="status"><b>✓ 업데이트 완료</b><span>{importStatus.label} · {new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(importStatus.importedAt))}</span><small>가계부 {money(importStatus.transactionCount)}건 · 투자상품 {money(importStatus.holdingCount)}개</small></div>}
       <div className="hero-card">
         <div className="hero-orb" />
@@ -581,23 +581,26 @@ function TransactionCalendar({hidden,transactions,initialMonth}:{hidden:boolean;
   const days=new Date(year,month+1,0).getDate();
   const cells=Array.from({length:firstDay+days},(_,index)=>index<firstDay?null:index-firstDay+1);
   const expenses=transactions.filter((item)=>item.date.startsWith(monthKey)&&item.kind==="expense");
-  const daily=new Map<string,{total:number;count:number}>();
-  for(const item of expenses){const value=daily.get(item.date)||{total:0,count:0};daily.set(item.date,{total:value.total+item.amount,count:value.count+1});}
+  const daily=new Map<string,{total:number;count:number;owners:Map<string,number>}>();
+  for(const item of expenses){const value=daily.get(item.date)||{total:0,count:0,owners:new Map<string,number>()};value.total+=item.amount;value.count+=1;value.owners.set(item.owner,(value.owners.get(item.owner)||0)+item.amount);daily.set(item.date,value);}
   const selectedItems=selectedDate?expenses.filter((item)=>item.date===selectedDate):[];
   const shownItems=selectedDate?selectedItems:expenses;
+  const selectedOwnerTotals=[...selectedItems.reduce((result,item)=>{const value=result.get(item.owner)||{total:0,count:0};result.set(item.owner,{total:value.total+item.amount,count:value.count+1});return result;},new Map<string,{total:number;count:number}>()).entries()].sort((a,b)=>b[1].total-a[1].total);
   return <div className="payment-calendar-wrap">
     <div className="calendar-toolbar payment-calendar-toolbar"><button type="button" onClick={()=>{setCursor(new Date(year,month-1,1));setSelectedDate("")}} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button type="button" onClick={()=>{setCursor(new Date(year,month+1,1));setSelectedDate("")}} aria-label="다음 달">›</button><button type="button" className="today-button" onClick={()=>{setCursor(new Date());setSelectedDate("")}}>오늘</button></div>
     <article className="calendar-card payment-calendar"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
       if(!day)return <div className="empty" key={index}/>;
       const dateKey=`${monthKey}-${String(day).padStart(2,"0")}`;const summary=daily.get(dateKey);
-      return <div key={dateKey}><button type="button" className={selectedDate===dateKey?"selected":""} onClick={()=>setSelectedDate(dateKey)} aria-label={`${dateKey}${summary?`, 결제 ${summary.count}건`:""}`}><span>{day}</span>{summary&&<><i className="payment-dot"/><small><Amount hidden={hidden}>{summary.total>=10000?`${Math.round(summary.total/10000)}만`:money(summary.total)}</Amount></small></>}</button></div>;
+      const owners=summary?[...summary.owners.entries()].map(([owner,total])=>`${owner} ${money(total)}원`).join(", "):"";
+      return <div key={dateKey}><button type="button" className={selectedDate===dateKey?"selected":""} onClick={()=>setSelectedDate(dateKey)} aria-label={`${dateKey}${summary?`, 결제 ${summary.count}건, ${owners}`:""}`}><span>{day}</span>{summary&&<><i className="payment-dot"/><small><Amount hidden={hidden}>{summary.total>=10000?`${Math.round(summary.total/10000)}만`:money(summary.total)}</Amount></small></>}</button></div>;
     })}</div></article>
     <div className="payment-calendar-summary"><div><span className="eyebrow">{selectedDate?selectedDate.replaceAll("-","."):`${month+1}월 전체`}</span><h3>결제 {shownItems.length}건</h3></div><strong><Amount hidden={hidden}>{money(shownItems.reduce((sum,item)=>sum+item.amount,0))}원</Amount></strong></div>
-    {selectedDate&&<div className="transaction-list calendar-transactions">{selectedItems.length?selectedItems.map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.category==="식비"?"○":item.category==="교통"?"↗":"◇"}</span><div><b>{item.merchant}</b><small>{item.category} · {item.paymentMethod||item.owner}</small></div><strong><Amount hidden={hidden}>-{money(item.amount)}원</Amount></strong></article>):<p className="empty-payment-day">이날의 결제 내역이 없어요.</p>}</div>}
+    {selectedDate&&selectedOwnerTotals.length>0&&<div className="owner-spending-summary">{selectedOwnerTotals.map(([owner,value])=><article key={owner}><span className={`owner-spending-avatar owner-${owner}`}>{owner.slice(0,1)}</span><div><b>{owner}</b><small>{value.count}건</small></div><strong><Amount hidden={hidden}>{money(value.total)}원</Amount></strong></article>)}</div>}
+    {selectedDate&&<div className="transaction-list calendar-transactions">{selectedItems.length?selectedItems.map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.category==="식비"?"○":item.category==="교통"?"↗":"◇"}</span><div><b>{item.merchant}</b><small>{item.owner} · {item.category}{item.paymentMethod?` · ${item.paymentMethod}`:""}</small></div><strong><Amount hidden={hidden}>-{money(item.amount)}원</Amount></strong></article>):<p className="empty-payment-day">이날의 결제 내역이 없어요.</p>}</div>}
   </div>;
 }
 
-function Ledger({ hidden, transactions, allTransactionsLoaded, loadingTransactions, onImport, onLoadAll }: { hidden: boolean; transactions: Transaction[]; allTransactionsLoaded:boolean; loadingTransactions:boolean; onImport: (files: FileList | null) => void; onLoadAll:()=>Promise<boolean> }) {
+function Ledger({ hidden, readOnly, transactions, allTransactionsLoaded, loadingTransactions, onImport, onLoadAll }: { hidden: boolean; readOnly:boolean; transactions: Transaction[]; allTransactionsLoaded:boolean; loadingTransactions:boolean; onImport: (files: FileList | null) => void; onLoadAll:()=>Promise<boolean> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [view,setView]=useState<"recent"|"all"|"calendar">("recent");
   const latestMonth = transactions.map((item)=>item.date.slice(0,7)).sort().at(-1) || seoulDateKey().slice(0,7);
@@ -624,11 +627,11 @@ function Ledger({ hidden, transactions, allTransactionsLoaded, loadingTransactio
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow={`${latestMonth.slice(0,4)}년 ${Number(latestMonth.slice(5))}월`} title="이번 달 생활비" copy="뱅크샐러드 내역에서 이체를 제외하고 지출과 수입을 정리했어요." />
-      <div className="upload-row"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 카드·뱅크샐러드 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{ onImport(event.target.files); event.target.value = ""; }} /><button className="icon-button" aria-label="자동 분류 새로고침">↻</button></div>
+      {readOnly?<div className="guest-notice">가족 공유 가계부 · 성근·지우·윤재의 결제 내역을 함께 봅니다.</div>:<div className="upload-row"><button className="primary-button" onClick={()=>inputRef.current?.click()}>＋ 카드·뱅크샐러드 내역 불러오기</button><input ref={inputRef} className="sr-only" type="file" accept=".xlsx,.xlsm,.csv" onChange={(event)=>{ onImport(event.target.files); event.target.value = ""; }} /><button className="icon-button" aria-label="자동 분류 새로고침">↻</button></div>}
       <div className="metric-grid ledger-metrics"><article className="metric-card wide"><p>총 지출</p><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong><small>이체 제외 · {expenses.length}건</small></article><article className="metric-card"><p>일 평균</p><strong><Amount hidden={hidden}>{compactMoney(total/elapsedDays)}</Amount></strong><small>{elapsedDays}일 기준</small></article><article className="metric-card"><p>총 수입</p><strong><Amount hidden={hidden}>{compactMoney(income)}</Amount></strong><small>{monthItems.filter((item)=>item.kind==="income").length}건</small></article></div>
       <article className="panel spending-panel"><div className="panel-head"><div><span className="eyebrow">항목별 지출</span><h2>어디에 썼을까요?</h2></div><span className="chip">{Number(latestMonth.slice(5))}월</span></div><div className="spending-chart"><div className="donut expense-donut" style={{background:chartStops ? `conic-gradient(${chartStops})` : undefined}}><div><small>합계</small><strong><Amount hidden={hidden}>{compactMoney(total)}</Amount></strong></div></div><div className="expense-legend">{categoryRows.map(([category,value],index)=><span key={category}><i className="dot" style={{background:chartColors[index]}}/>{category} <b>{percentage(value,total).toFixed(0)}%</b></span>)}</div></div></article>
       <div className="section-title-row"><div><span className="eyebrow">{view==="recent"?"최근 내역":view==="all"?"전체 내역":"월별 보기"}</span><h2>결제 내역</h2></div><div className="ledger-view-actions"><button type="button" className={`text-button ${view==="calendar"?"active":""}`} disabled={loadingTransactions} onClick={()=>void changeView(view==="calendar"?"recent":"calendar")}><Icon name="calendar"/>{view==="calendar"?"목록보기":"캘린더"}</button><button type="button" className="text-button" disabled={loadingTransactions} onClick={()=>void changeView(view==="all"?"recent":"all")}>{loadingTransactions?"불러오는 중…":view==="all"?"접기":"전체보기"}</button></div></div>
-      {view==="calendar"?<TransactionCalendar hidden={hidden} transactions={transactions} initialMonth={latestMonth}/>:<div className="transaction-list">{(view==="all"?transactions:transactions.slice(0,8)).map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.kind === "income" ? "+" : item.category === "식비" ? "○" : item.category === "교통" ? "↗" : "◇"}</span><div><b>{item.merchant}</b><small>{item.date.slice(5).replace("-",".")} · {item.category} · {item.paymentMethod||item.owner}</small></div><strong className={item.kind === "income" ? "positive" : ""}><Amount hidden={hidden}>{item.kind === "income" ? "+" : "-"}{money(item.amount)}원</Amount></strong></article>)}</div>}
+      {view==="calendar"?<TransactionCalendar hidden={hidden} transactions={transactions} initialMonth={latestMonth}/>:<div className="transaction-list">{(view==="all"?transactions:transactions.slice(0,8)).map((item)=><article className="transaction-row" key={item.id}><span className="transaction-icon">{item.kind === "income" ? "+" : item.category === "식비" ? "○" : item.category === "교통" ? "↗" : "◇"}</span><div><b>{item.merchant}</b><small>{item.date.slice(5).replace("-",".")} · {item.owner} · {item.category}{item.paymentMethod?` · ${item.paymentMethod}`:""}</small></div><strong className={item.kind === "income" ? "positive" : ""}><Amount hidden={hidden}>{item.kind === "income" ? "+" : "-"}{money(item.amount)}원</Amount></strong></article>)}</div>}
     </section>
   );
 }
@@ -637,7 +640,7 @@ function CalendarScreen({ events, transactions, readOnly, status, checking, dele
   const [cursor, setCursor] = useState(new Date());
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-  useEffect(()=>{if(!readOnly)void onMonthChange(year,month)},[year,month,onMonthChange,readOnly]);
+  useEffect(()=>{void onMonthChange(year,month)},[year,month,onMonthChange]);
   const firstDay = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
   const cells = Array.from({ length: firstDay + days }, (_, i) => i < firstDay ? null : i - firstDay + 1);
@@ -650,7 +653,7 @@ function CalendarScreen({ events, transactions, readOnly, status, checking, dele
       {!readOnly&&<article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
         <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button>
       </article>}
-      {readOnly&&<div className="guest-notice">게스트 모드 · 내 이름으로 등록된 일정만 표시합니다.</div>}
+      {readOnly&&<div className="guest-notice">가족 공유 일정 · 모든 가족 일정과 결제 발생일을 함께 봅니다.</div>}
       <div className="calendar-toolbar"><button onClick={()=>setCursor(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>setCursor(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>setCursor(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
         const dateKey = day ? `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` : "";
@@ -661,7 +664,7 @@ function CalendarScreen({ events, transactions, readOnly, status, checking, dele
         return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" disabled={readOnly} onClick={()=>onAdd(dateKey)} aria-label={`${dateKey} 일정 ${dayEvents.length}개, 결제 ${paymentCount}건`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,2).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}{!!paymentCount&&<i className="payment-dot" title={`결제 ${paymentCount}건`}/>}</span></button>}</div>
       })}</div></article>
       <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div>{!readOnly&&<button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button>}</div>
-      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">{readOnly?"등록된 내 일정이 없습니다.":"날짜를 눌러 가족 일정을 추가해 보세요."}</div>}</div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">등록된 가족 일정이 없습니다.</div>}</div>
       <div className="calendar-legend"><span><i className="event-dot mint"/>일정</span><span><i className="payment-dot"/>결제 발생일 ({monthTransactions.length}건)</span></div>
       {!readOnly&&<a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>}
     </section>
@@ -878,6 +881,7 @@ export default function Home() {
       const completeTransactions=data.transactions.length >= (data.transaction_count||data.transactions.length);
       allTransactionsLoadedRef.current=completeTransactions;
       setAllTransactionsLoaded(completeTransactions);
+      if(!completeTransactions)void loadAllTransactions();
       const summary = data.summary;
       const known = summary.real_estate_value + summary.investment_value + summary.cash_value;
       setPortfolio({
@@ -896,6 +900,7 @@ export default function Home() {
       setProtectedMode(Boolean(data.protected));
       setLocked(false);
       void loadGowalterPrompt();
+      if(data.viewer.role==="admin"&&!calendarStatus)void refreshCalendarIntegration();
       return true;
     } catch {
       return false;
@@ -1165,21 +1170,28 @@ export default function Home() {
     } finally { setDeletingEventId(""); }
   }
 
-  async function checkCalendar() {
-    setBusy("calendar");
+  async function refreshCalendarIntegration() {
     try {
       const response = await fetch("/api/calendar",{headers:authHeaders(),cache:"no-store"});
       const result = await response.json().catch(()=>({message:"연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus&{error?:string};
       if(!response.ok)throw new Error(result.error||result.message||"연결 확인 실패");
       setCalendarStatus(result);
       setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(result)}}:current);
-      setToast(result.connected?"Google Calendar 연결을 확인했어요.":result.message);
+      return result;
     } catch(error) {
       const message = error instanceof Error?error.message:"Google Calendar 연결 확인 실패";
       const failed={configured:false,connected:false,message};
       setCalendarStatus(failed);
       setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(failed)}}:current);
-      setToast(message);
+      return failed;
+    }
+  }
+
+  async function checkCalendar() {
+    setBusy("calendar");
+    try {
+      const result=await refreshCalendarIntegration();
+      setToast(result.connected?"Google Calendar 연결을 확인했어요.":result.message);
     } finally { setBusy(""); }
   }
 
@@ -1197,7 +1209,7 @@ export default function Home() {
   }
 
   if (locked) {
-    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>내 계정을 선택하고 가족 비밀번호로 로그인해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault();try{await login()}catch(error){setToast(error instanceof Error?error.message:"로그인하지 못했습니다.")}}}><label className="login-label">계정<select value={loginOwner} onChange={(event)=>setLoginOwner(event.target.value as typeof loginOwner)}><option>성근</option><option>지우</option><option>윤재</option></select></label><label className="login-label">비밀번호<input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="비밀번호" autoComplete="current-password" required/></label><button className="primary-button full">로그인</button></form><small className="login-role-note">성근 · 관리자 / 지우·윤재 · 본인 자산 조회</small></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
+    return <main className="lock-screen"><div className="lock-card"><span className="brand-mark"><i/><i/><i/></span><span className="eyebrow">Private family app</span><h1>우리 가족만의 공간</h1><p>내 계정을 선택하고 가족 비밀번호로 로그인해 주세요.</p><form onSubmit={async (event)=>{event.preventDefault();try{await login()}catch(error){setToast(error instanceof Error?error.message:"로그인하지 못했습니다.")}}}><label className="login-label">계정<select value={loginOwner} onChange={(event)=>setLoginOwner(event.target.value as typeof loginOwner)}><option>성근</option><option>지우</option><option>윤재</option></select></label><label className="login-label">비밀번호<input type="password" value={accessKey} onChange={(event)=>setAccessKey(event.target.value)} placeholder="비밀번호" autoComplete="current-password" required/></label><button className="primary-button full">로그인</button></form><small className="login-role-note">성근 · 관리자 / 지우·윤재 · 내 자산 조회 + 가족 가계부·일정 공유</small></div>{toast && <div className="toast" role="status">{toast}</div>}</main>;
   }
 
   const allHoldings = serverState?.holdings||[];
@@ -1207,9 +1219,9 @@ export default function Home() {
   const viewer = serverState?.viewer||{owner:"성근" as const,role:"admin" as const};
   const isAdmin = viewer.role==="admin";
   const displayedStockHoldings = isAdmin && stockOwnerFilter!=="전체" ? stockHoldings.filter((item)=>item.owner===stockOwnerFilter) : stockHoldings;
-  const visibleNavItems = isAdmin ? navItems : navItems.filter((item)=>["summary","stocks","crypto","realestate","calendar"].includes(item.id));
-  const visibleEvents = isAdmin ? events : events.filter((event)=>event.owner===viewer.owner);
-  const bottomItems = isAdmin ? [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}] : [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"calendar",label:"일정",icon:"calendar"}];
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((item)=>["summary","stocks","ledger","crypto","realestate","calendar"].includes(item.id));
+  const visibleEvents = events;
+  const bottomItems = isAdmin ? [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"},{id:"settings",label:"설정",icon:"settings"}] : [{id:"summary",label:"홈",icon:"home"},{id:"stocks",label:"자산",icon:"chart"},{id:"ledger",label:"가계부",icon:"wallet"},{id:"calendar",label:"일정",icon:"calendar"}];
 
   return (
     <main className="app-shell">
@@ -1224,7 +1236,7 @@ export default function Home() {
         {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} readOnly={!isAdmin} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
         {tab === "stocks" && <Stocks hidden={hidden} readOnly={!isAdmin} ownerFilter={stockOwnerFilter} onOwnerFilter={setStockOwnerFilter} holdings={displayedStockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
-        {tab === "ledger" && <Ledger hidden={hidden} transactions={transactions} allTransactionsLoaded={allTransactionsLoaded} loadingTransactions={loadingTransactions} onImport={importFile} onLoadAll={loadAllTransactions} />}
+        {tab === "ledger" && <Ledger hidden={hidden} readOnly={!isAdmin} transactions={transactions} allTransactionsLoaded={allTransactionsLoaded} loadingTransactions={loadingTransactions} onImport={importFile} onLoadAll={loadAllTransactions} />}
         {tab === "crypto" && <Crypto hidden={hidden} readOnly={!isAdmin} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} readOnly={!isAdmin} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
         {tab === "calendar" && <CalendarScreen events={visibleEvents} transactions={transactions} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onMonthChange={loadCalendarMonth} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}

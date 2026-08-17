@@ -7,7 +7,6 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const viewer = await backendViewer(request);
   if (!viewer) return Response.json({ error: "unauthorized" }, { status: 401 });
-  if (viewer.role !== "admin") return Response.json({ error: "admin only" }, { status: 403 });
   const url = new URL(request.url);
   const timeMin = url.searchParams.get("timeMin");
   const timeMax = url.searchParams.get("timeMax");

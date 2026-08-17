@@ -112,8 +112,6 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
 def build_state(db: Session, owner: str | None = None, role: str = "admin") -> dict[str, object]:
     summary = calculate_summary(db, owner=owner)
     latest_date_query = select(func.max(Transaction.transaction_date))
-    if owner:
-        latest_date_query = latest_date_query.where(Transaction.owner == owner)
     latest_transaction_date = db.scalar(latest_date_query)
     if latest_transaction_date:
         month_start = latest_transaction_date.replace(day=1)
@@ -126,8 +124,6 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
                 Transaction.transaction_date >= month_start,
                 Transaction.transaction_date < next_month,
             )
-        if owner:
-            spending_query = spending_query.where(Transaction.owner == owner)
         monthly_spending = db.scalar(spending_query) or 0
         spending_month = month_start.strftime("%Y-%m")
     else:
@@ -150,14 +146,10 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
     if owner:
         holding_query = holding_query.where(Holding.owner == owner)
         debt_query = debt_query.where(Debt.owner == owner)
-        transaction_query = transaction_query.where(Transaction.owner == owner)
-        event_query = event_query.where(FamilyEvent.owner == owner)
     holdings = list(db.scalars(holding_query.order_by(Holding.market_value.desc())))
     debts = list(db.scalars(debt_query.order_by(Debt.balance.desc())))
     transactions = list(db.scalars(transaction_query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc()).limit(200)))
     transaction_count_query = select(func.count(Transaction.id))
-    if owner:
-        transaction_count_query = transaction_count_query.where(Transaction.owner == owner)
     transaction_count = db.scalar(transaction_count_query) or 0
     events = list(db.scalars(event_query.order_by(FamilyEvent.event_date, FamilyEvent.event_time, FamilyEvent.id)))
     snapshots = list(
