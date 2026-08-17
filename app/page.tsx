@@ -254,6 +254,17 @@ const compactMoney = (value: number) => {
 const percentage = (value: number, total: number) => total ? value / total * 100 : 0;
 const isCryptoHolding = (item: HoldingData) => ["코인", "암호화폐", "crypto"].includes(item.asset_type.toLowerCase());
 const assetKey = (item: HoldingData) => `holding:${item.id}`;
+const seoulDateKey = (value = new Date()) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(value).map((part)=>[part.type,part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+const calendarIntegration = (status:CalendarConnectionStatus):IntegrationStatus[string] => ({
+  configured:status.configured,
+  connected:status.connected,
+  message:status.connected?`${status.calendarName||"공유 캘린더"} 연결됨`:status.message,
+  detail:status.calendarId||"",
+  last_checked_at:new Date().toISOString(),
+});
 
 function Icon({ name }: { name: string }) {
   const paths:Record<string,ReactNode> = {
@@ -589,7 +600,7 @@ function TransactionCalendar({hidden,transactions,initialMonth}:{hidden:boolean;
 function Ledger({ hidden, transactions, allTransactionsLoaded, loadingTransactions, onImport, onLoadAll }: { hidden: boolean; transactions: Transaction[]; allTransactionsLoaded:boolean; loadingTransactions:boolean; onImport: (files: FileList | null) => void; onLoadAll:()=>Promise<boolean> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [view,setView]=useState<"recent"|"all"|"calendar">("recent");
-  const latestMonth = transactions.map((item)=>item.date.slice(0,7)).sort().at(-1) || "2026-08";
+  const latestMonth = transactions.map((item)=>item.date.slice(0,7)).sort().at(-1) || seoulDateKey().slice(0,7);
   const monthItems = transactions.filter((item)=>item.date.startsWith(latestMonth));
   const expenses = monthItems.filter((item)=>item.kind !== "income");
   const income = monthItems.filter((item)=>item.kind === "income").reduce((sum,item)=>sum+item.amount,0);
@@ -796,6 +807,7 @@ export default function Home() {
   const [hidden, setHidden] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [allTransactionsLoaded,setAllTransactionsLoaded]=useState(false);
+  const allTransactionsLoadedRef=useRef(false);
   const [loadingTransactions,setLoadingTransactions]=useState(false);
   const [portfolio, setPortfolio] = useState<Portfolio>(initialPortfolio);
   const [serverState, setServerState] = useState<ServerState | null>(null);
@@ -803,7 +815,7 @@ export default function Home() {
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [modal, setModal] = useState(false);
-  const [eventDate,setEventDate] = useState(new Date().toISOString().slice(0,10));
+  const [eventDate,setEventDate] = useState(seoulDateKey);
   const [calendarStatus,setCalendarStatus] = useState<CalendarConnectionStatus|null>(null);
   const [stockOwnerFilter,setStockOwnerFilter] = useState("전체");
   const [deletingEventId,setDeletingEventId] = useState("");
@@ -863,7 +875,9 @@ export default function Home() {
       setServerState(data);
       setEvents(sharedEvents);
       setTransactions(data.transactions.map(toTransaction));
-      setAllTransactionsLoaded(data.transactions.length >= (data.transaction_count||data.transactions.length));
+      const completeTransactions=data.transactions.length >= (data.transaction_count||data.transactions.length);
+      allTransactionsLoadedRef.current=completeTransactions;
+      setAllTransactionsLoaded(completeTransactions);
       const summary = data.summary;
       const known = summary.real_estate_value + summary.investment_value + summary.cash_value;
       setPortfolio({
@@ -910,7 +924,7 @@ export default function Home() {
   }
 
   const loadAllTransactions=useCallback(async()=>{
-    if(allTransactionsLoaded)return true;
+    if(allTransactionsLoadedRef.current)return true;
     setLoadingTransactions(true);
     try {
       const all:Transaction[]=[];let offset=0;let hasMore=true;
@@ -920,20 +934,24 @@ export default function Home() {
         if(!response.ok||!Array.isArray(result.items))throw new Error(result.detail||"전체 결제 내역을 불러오지 못했습니다.");
         all.push(...(result.items as ServerState["transactions"]).map(toTransaction));offset+=result.items.length;hasMore=Boolean(result.has_more)&&result.items.length>0;
       }
-      setTransactions(all);setAllTransactionsLoaded(true);return true;
+      setTransactions(all);allTransactionsLoadedRef.current=true;setAllTransactionsLoaded(true);return true;
     } catch(error){setToast(error instanceof Error?error.message:"전체 결제 내역을 불러오지 못했습니다.");return false;}
     finally{setLoadingTransactions(false);}
-  },[allTransactionsLoaded]);
+  },[]);
 
   const loadCalendarMonth=useCallback(async(year:number,month:number)=>{
-    const timeMin=new Date(Date.UTC(year,month,1)).toISOString();
-    const timeMax=new Date(Date.UTC(year,month+1,1)).toISOString();
     const monthKey=`${year}-${String(month+1).padStart(2,"0")}`;
+    const nextMonth=new Date(Date.UTC(year,month+1,1));
+    const nextMonthKey=`${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth()+1).padStart(2,"0")}`;
+    const timeMin=`${monthKey}-01T00:00:00+09:00`;
+    const timeMax=`${nextMonthKey}-01T00:00:00+09:00`;
     try{
+      await loadAllTransactions();
       const response=await fetch(`/api/calendar?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`,{headers:{"x-moa-request":"1"},cache:"no-store"});
       const result=await response.json().catch(()=>({})) as CalendarConnectionStatus&{events?:CalendarEvent[];error?:string};
       if(!response.ok)throw new Error(result.error||result.message||"Google 일정을 불러오지 못했습니다.");
       setCalendarStatus(result);
+      setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(result)}}:current);
       if(!result.connected)return false;
       const googleEvents=Array.isArray(result.events)?result.events:[];
       setEvents((current)=>{
@@ -942,8 +960,13 @@ export default function Home() {
         return [...preserved,...googleEvents.filter((event)=>!appGoogleIds.has(event.googleEventId))].sort((a,b)=>`${a.date}${a.time||""}`.localeCompare(`${b.date}${b.time||""}`));
       });
       return true;
-    }catch(error){setCalendarStatus({configured:true,connected:false,message:error instanceof Error?error.message:"Google Calendar 연결 실패"});return false;}
-  },[]);
+    }catch(error){
+      const failed={configured:true,connected:false,message:error instanceof Error?error.message:"Google Calendar 연결 실패"};
+      setCalendarStatus(failed);
+      setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(failed)}}:current);
+      return false;
+    }
+  },[loadAllTransactions]);
 
   async function login() {
     const response = await fetch("/backend/auth/login",{method:"POST",headers:authHeaders(true),body:JSON.stringify({owner:loginOwner,password:accessKey})});
@@ -956,6 +979,8 @@ export default function Home() {
 
   async function logout() {
     await fetch("/backend/auth/logout",{method:"POST",headers:authHeaders()}).catch(()=>null);
+    allTransactionsLoadedRef.current=false;
+    setAllTransactionsLoaded(false);
     setServerState(null);
     setTab("summary");
     setLocked(true);
@@ -1088,9 +1113,16 @@ export default function Home() {
   async function probeIntegrations() {
     setBusy("probe");
     try {
-      const response=await fetch("/backend/integrations/status?probe=true",{headers:authHeaders()});
-      const result=await response.json();
-      if(response.ok)setServerState((current)=>current?{...current,integrations:result}:current);
+      const [response,calendarResponse]=await Promise.all([
+        fetch("/backend/integrations/status?probe=true",{headers:authHeaders(),cache:"no-store"}),
+        fetch("/api/calendar",{headers:authHeaders(),cache:"no-store"}),
+      ]);
+      const result=await response.json() as IntegrationStatus;
+      if(!response.ok)throw new Error("연동 상태 조회 실패");
+      const calendarResult=await calendarResponse.json().catch(()=>({message:"Google Calendar 연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus&{error?:string};
+      const liveCalendar:CalendarConnectionStatus=calendarResponse.ok?calendarResult:{configured:calendarResult.configured??true,connected:false,message:calendarResult.error||calendarResult.message};
+      setCalendarStatus(liveCalendar);
+      setServerState((current)=>current?{...current,integrations:{...result,google_calendar:calendarIntegration(liveCalendar)}}:current);
       setToast("외부 연동 상태를 실제로 확인했어요.");
     } catch{setToast("연동 상태를 확인하지 못했어요.");} finally{setBusy("");}
   }
@@ -1140,15 +1172,18 @@ export default function Home() {
       const result = await response.json().catch(()=>({message:"연결 상태를 읽지 못했습니다."})) as CalendarConnectionStatus&{error?:string};
       if(!response.ok)throw new Error(result.error||result.message||"연결 확인 실패");
       setCalendarStatus(result);
+      setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(result)}}:current);
       setToast(result.connected?"Google Calendar 연결을 확인했어요.":result.message);
     } catch(error) {
       const message = error instanceof Error?error.message:"Google Calendar 연결 확인 실패";
-      setCalendarStatus({configured:false,connected:false,message});
+      const failed={configured:false,connected:false,message};
+      setCalendarStatus(failed);
+      setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(failed)}}:current);
       setToast(message);
     } finally { setBusy(""); }
   }
 
-  function openEventModal(date = new Date().toISOString().slice(0,10)) {
+  function openEventModal(date = seoulDateKey()) {
     setEventDate(date);
     setModal(true);
   }
