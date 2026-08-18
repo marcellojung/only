@@ -166,6 +166,10 @@ def build_state(db: Session, owner: str | None = None, role: str = "admin") -> d
         category = asset.category.replace(" ", "")
         if any(word in category for word in ("투자", "주식", "펀드", "증권")):
             continue
+        if owner is None and "부동산" in category:
+            members["성근"] = members.get("성근", 0) + asset.value / 2
+            members["지우"] = members.get("지우", 0) + asset.value / 2
+            continue
         members[asset.owner] = members.get(asset.owner, 0) + asset.value
     for holding in holdings:
         members[holding.owner] = members.get(holding.owner, 0) + holding.market_value

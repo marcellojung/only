@@ -45,3 +45,20 @@ def test_guest_state_keeps_assets_private_but_shares_ledger_and_calendar() -> No
         assert state["history"] == []
         assert state["latest_analysis"] is None
         assert state["integrations"] == {}
+
+
+def test_admin_state_splits_real_estate_between_couple() -> None:
+    with database() as db:
+        db.add_all(
+            [
+                AssetItem(owner="성근", source_key="shared-home", category="부동산", name="우리 집", value=1_000),
+                AssetItem(owner="성근", source_key="admin-cash", category="현금", name="성근 현금", value=100),
+                Holding(owner="지우", source_key="jiwoo-stock", asset_type="주식", name="지우 주식", market_value=200, principal=150),
+            ]
+        )
+        db.commit()
+
+        state = build_state(db, role="admin")
+
+        assert state["members"]["성근"] == 600
+        assert state["members"]["지우"] == 700
