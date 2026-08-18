@@ -60,6 +60,8 @@ class Settings:
     google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "")
     google_service_account_email: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
     google_private_key: str = os.getenv("GOOGLE_PRIVATE_KEY", "")
+    google_oauth_client_id: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+    google_oauth_client_secret: str = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
     auto_refresh_enabled: bool = os.getenv("AUTO_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     auto_refresh_times: str = os.getenv("AUTO_REFRESH_TIMES", "09:00,13:00,17:00,21:00")
 

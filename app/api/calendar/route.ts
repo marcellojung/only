@@ -1,4 +1,4 @@
-import { checkCalendarConnection, createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from "../../../lib/google-calendar";
+import { checkCalendarConnection, createCalendarEvent, deleteCalendarEvent, listCalendarEvents, updateGoogleCalendarSelection } from "../../../lib/google-calendar";
 import { backendViewer } from "../../../lib/backend-auth";
 import { acceptsMutation } from "../../../lib/session";
 
@@ -34,6 +34,22 @@ export async function POST(request: Request) {
     return Response.json(result, { status: result.configured ? 201 : 202 });
   } catch(error) {
     return Response.json({ error:error instanceof Error?error.message:"calendar sync failed" }, { status: 502 });
+  }
+}
+
+export async function PUT(request:Request) {
+  if (!acceptsMutation(request)) return Response.json({error:"invalid request"},{status:403});
+  const viewer = await backendViewer(request);
+  if (!viewer) return Response.json({error:"unauthorized"},{status:401});
+  if (viewer.role!=="admin") return Response.json({error:"admin only"},{status:403});
+  try {
+    const body = await request.json() as {selectedCalendarIds?:unknown;writeCalendarId?:unknown};
+    if (!Array.isArray(body.selectedCalendarIds)||!body.selectedCalendarIds.every((id)=>typeof id==="string")) {
+      return Response.json({error:"selectedCalendarIds must be a string array"},{status:400});
+    }
+    return Response.json(await updateGoogleCalendarSelection(body.selectedCalendarIds,typeof body.writeCalendarId==="string"?body.writeCalendarId:""));
+  } catch(error) {
+    return Response.json({error:error instanceof Error?error.message:"calendar selection failed"},{status:400});
   }
 }
 

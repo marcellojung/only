@@ -39,7 +39,7 @@ Windows PC를 계속 켜둘 수 있다면 Tailscale Funnel로 별도 도메인�
 - `AUTO_REFRESH_ENABLED`, `AUTO_REFRESH_TIMES`: 서버 실행 중 한국시간 기준 자동 시세 갱신 여부와 시각. 기본값은 `09:00,13:00,17:00,21:00`
 - `OPENAI_API_KEY`: 선택 사항. 없으면 수치 기반 로컬 분석 사용
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 목표가 알림 연결
-- Google Calendar 관련 환경 변수 3개
+- Google Calendar OAuth 환경 변수 3개(기존 서비스 계정 방식도 호환)
 
 성근 계정은 전체 가족 자산·일정을 보고 등록·수정할 수 있는 관리자입니다. 지우·윤재 계정은 각자 소유로 등록된 주식/ETF를 포함한 자산과 일정만 조회하는 게스트입니다. 게스트 계정은 해당 비밀번호를 설정해야 활성화됩니다.
 
@@ -49,10 +49,15 @@ SQLite 파일과 `.env.local`은 Git에서 제외됩니다. Funnel 모드는 `AU
 
 ## Google Calendar 연결
 
-1. Google Cloud Console에서 프로젝트와 서비스 계정을 만들고 Calendar API를 활성화합니다.
-2. 가족이 사용할 공유 캘린더 설정에서 서비스 계정 이메일에 **일정 변경 권한**을 부여합니다.
-3. 호스팅 환경 변수에 `GOOGLE_CALENDAR_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`를 입력합니다.
-4. 웹앱을 다시 배포합니다.
+1. Google Cloud Console에서 Calendar API를 활성화하고 OAuth 동의 화면을 설정합니다.
+2. **웹 애플리케이션** OAuth 클라이언트를 만들고 `https://배포주소/api/calendar/oauth/callback`을 승인된 리디렉션 URI로 등록합니다.
+3. 환경 변수에 `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`를 입력하고 웹앱을 다시 시작합니다.
+4. 관리자 계정으로 일정 화면을 열고 **Google 계정 연결**을 누릅니다.
+5. 연결된 계정의 기본·구독·공유 캘린더 목록에서 앱에 표시할 항목과 새 일정 저장 위치를 선택합니다.
+
+OAuth refresh token과 선택값은 Git에서 제외되는 `data/google-calendar-oauth.json`에 서버 전용 권한으로 저장됩니다. 공유받은 캘린더는 연결한 Google 계정의 캘린더 목록에 추가되어 있고 최소 **모든 일정 세부정보 보기** 권한이 있어야 합니다. 새 일정 추가·삭제 대상으로 쓰려면 **일정 변경** 권한이 필요합니다.
+
+기존 `GOOGLE_CALENDAR_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` 서비스 계정 방식도 단일 캘린더 호환용으로 유지됩니다. OAuth 연결이 완료되면 OAuth 캘린더 목록을 우선 사용합니다.
 
 설정 전에도 화면과 일정 추가 흐름을 시험할 수 있으며, 일정은 공용 SQLite DB에 저장되어 각 가족 기기에서 동기화됩니다. 연결 후 새 일정은 공유 Google Calendar에도 기록됩니다.
 앱에서 추가한 Google 일정은 일정 목록의 **삭제** 버튼으로 공유 캘린더에서도 함께 삭제됩니다. 기존 브라우저에 저장된 일정은 관리자가 처음 로그인할 때 공용 DB로 자동 이전됩니다.

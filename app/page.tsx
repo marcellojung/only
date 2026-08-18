@@ -154,6 +154,19 @@ type CalendarEvent = {
   googleEventId?: string;
   source?:"app"|"google";
   htmlLink?:string;
+  googleCalendarId?:string;
+  calendarName?:string;
+  calendarWritable?:boolean;
+};
+
+type GoogleCalendarChoice = {
+  id:string;
+  summary:string;
+  primary:boolean;
+  accessRole:string;
+  backgroundColor:string;
+  selected:boolean;
+  writable:boolean;
 };
 
 type CalendarConnectionStatus = {
@@ -162,6 +175,11 @@ type CalendarConnectionStatus = {
   message:string;
   calendarName?:string;
   calendarId?:string;
+  authMode?:"oauth"|"service_account";
+  oauthConfigured?:boolean;
+  calendars?:GoogleCalendarChoice[];
+  selectedCalendarIds?:string[];
+  writeCalendarId?:string;
 };
 
 type VersionInfo = { version:string; revision:string; started_at:string };
@@ -637,7 +655,7 @@ function Ledger({ hidden, readOnly, transactions, allTransactionsLoaded, loading
   );
 }
 
-function CalendarScreen({ events, transactions, hidden, readOnly, status, checking, deletingId, onCheck, onMonthChange, onAdd, onDelete }: { events: CalendarEvent[]; transactions:Transaction[]; hidden:boolean; readOnly:boolean; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onMonthChange:(year:number,month:number)=>Promise<boolean>; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
+function CalendarScreen({ events, transactions, hidden, readOnly, status, checking, deletingId, onCheck, onCalendarConfig, onMonthChange, onAdd, onDelete }: { events: CalendarEvent[]; transactions:Transaction[]; hidden:boolean; readOnly:boolean; status:CalendarConnectionStatus|null; checking:boolean; deletingId:string; onCheck:()=>void; onCalendarConfig:(selectedCalendarIds:string[],writeCalendarId:string)=>Promise<boolean>; onMonthChange:(year:number,month:number)=>Promise<boolean>; onAdd: (date?:string) => void; onDelete:(event:CalendarEvent)=>void }) {
   const [cursor, setCursor] = useState(new Date());
   const [selectedDate,setSelectedDate] = useState("");
   const year = cursor.getFullYear();
@@ -652,12 +670,23 @@ function CalendarScreen({ events, transactions, hidden, readOnly, status, checki
   const selectedEvents=selectedDate?monthEvents.filter((event)=>event.date===selectedDate):[];
   const selectedTransactions=selectedDate?monthTransactions.filter((item)=>item.date===selectedDate):[];
   function moveMonth(next:Date){setCursor(next);setSelectedDate("");}
+  async function saveCalendarConfig(selectedCalendarIds:string[],writeCalendarId:string) {
+    if (await onCalendarConfig(selectedCalendarIds,writeCalendarId)) await onMonthChange(year,month);
+  }
+  function toggleCalendar(calendar:GoogleCalendarChoice,checked:boolean) {
+    const selected = new Set(status?.selectedCalendarIds||[]);
+    if (checked) selected.add(calendar.id); else selected.delete(calendar.id);
+    const selectedIds = [...selected];
+    const currentWrite = status?.writeCalendarId||"";
+    const nextWrite = selected.has(currentWrite)?currentWrite:(status?.calendars||[]).find((item)=>selected.has(item.id)&&item.writable)?.id||"";
+    void saveCalendarConfig(selectedIds,nextWrite);
+  }
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="Google Calendar + 가계부" title="우리의 공동 일정" copy="공유 일정과 날짜별 결제 여부를 한 달력에서 함께 확인해요." />
-      {!readOnly&&<article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
-        <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button>
-      </article>}
+      {!readOnly&&<><article className={`calendar-connection ${status?.connected?"connected":status?"failed":""}`}>
+        <span className="calendar-connection-icon">G</span><div><b>{status?.connected?status.calendarName||"Google Calendar 연결됨":"Google Calendar 연동 상태"}</b><small>{status?.message||"실제 API 연결을 확인해 보세요."}</small></div><div className="calendar-connection-actions">{status?.oauthConfigured&&<a href="/api/calendar/oauth/start">{status.authMode==="oauth"?"계정 다시 연결":"Google 계정 연결"}</a>}<button type="button" disabled={checking} onClick={onCheck}>{checking?"확인 중…":"연결 확인"}</button></div>
+      </article>{status?.authMode==="oauth"&&Boolean(status.calendars?.length)&&<article className="panel calendar-source-panel"><div className="panel-head"><div><span className="eyebrow">CalendarList</span><h2>표시할 캘린더</h2></div><strong>{status.selectedCalendarIds?.length||0}개 선택</strong></div><div className="calendar-choice-list">{status.calendars?.map((calendar)=><label key={calendar.id}><input type="checkbox" checked={calendar.selected} disabled={checking} onChange={(event)=>toggleCalendar(calendar,event.target.checked)}/><i style={{background:calendar.backgroundColor}}/><span><b>{calendar.summary}</b><small>{calendar.primary?"기본 캘린더 · ":""}{calendar.writable?"일정 읽기·쓰기":"일정 읽기 전용"}</small></span></label>)}</div><label className="calendar-write-target">새 일정 저장 위치<select value={status.writeCalendarId||""} disabled={checking} onChange={(event)=>void saveCalendarConfig(status.selectedCalendarIds||[],event.target.value)}><option value="">저장하지 않음</option>{status.calendars?.filter((calendar)=>calendar.selected&&calendar.writable).map((calendar)=><option value={calendar.id} key={calendar.id}>{calendar.summary}</option>)}</select></label></article>}</>}
       {readOnly&&<div className="guest-notice">가족 공유 일정 · 모든 가족 일정과 결제 발생일을 함께 봅니다.</div>}
       <div className="calendar-toolbar"><button onClick={()=>moveMonth(new Date(year,month-1,1))} aria-label="이전 달">‹</button><h2>{year}. {String(month+1).padStart(2,"0")}</h2><button onClick={()=>moveMonth(new Date(year,month+1,1))} aria-label="다음 달">›</button><button className="today-button" onClick={()=>moveMonth(new Date())}>오늘</button></div>
       <article className="calendar-card"><div className="weekdays">{["일","월","화","수","목","금","토"].map((day)=><span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day,index)=>{
@@ -668,9 +697,9 @@ function CalendarScreen({ events, transactions, hidden, readOnly, status, checki
         const isToday = year===today.getFullYear() && month===today.getMonth() && day===today.getDate();
         return <div className={`${day?"":"empty"} ${isToday?"today":""}`} key={index}>{day && <button type="button" className={selectedDate===dateKey?"selected":""} onClick={()=>setSelectedDate(dateKey)} aria-pressed={selectedDate===dateKey} aria-label={`${dateKey} 연동 내역: 일정 ${dayEvents.length}개, 결제 ${paymentCount}건`}><span>{day}</span><span className="event-dots">{dayEvents.slice(0,2).map((event)=><i key={event.id} className={`event-dot ${event.color || "mint"}`} title={event.title}/>)}{!!paymentCount&&<i className="payment-dot" title={`결제 ${paymentCount}건`}/>}</span></button>}</div>
       })}</div></article>
-      {selectedDate&&<article className="panel calendar-day-detail"><div className="panel-head"><div><span className="eyebrow">{selectedDate.replaceAll("-",".")}</span><h2>연동된 내역</h2></div><span className="detail-count">일정 {selectedEvents.length} · 결제 {selectedTransactions.length}</span></div><div className="linked-detail-list">{selectedEvents.map((event)=><div className="linked-detail-row" key={event.id}><i className={`event-line ${event.color||"mint"}`}/><span className="linked-detail-icon"><Icon name="calendar"/></span><div><b>{event.title}</b><small>{event.time||"종일"} · {event.owner}{event.googleEventId?" · Google Calendar":" · 앱 저장"}</small></div>{event.htmlLink?<a href={event.htmlLink} target="_blank" rel="noreferrer" aria-label={`${event.title} Google Calendar에서 열기`}>↗</a>:<span/>}</div>)}{selectedTransactions.map((item)=><div className="linked-detail-row" key={`transaction:${item.id}`}><i className="event-line payment"/><span className="linked-detail-icon payment"><Icon name="receipt"/></span><div><b>{item.merchant}</b><small>{item.owner} · {item.category}{item.paymentMethod?` · ${item.paymentMethod}`:""}</small></div><strong><Amount hidden={hidden}>-{money(item.amount)}원</Amount></strong></div>)}{!selectedEvents.length&&!selectedTransactions.length&&<p className="calendar-empty">이날 연동된 일정이나 결제 내역이 없습니다.</p>}</div></article>}
+      {selectedDate&&<article className="panel calendar-day-detail"><div className="panel-head"><div><span className="eyebrow">{selectedDate.replaceAll("-",".")}</span><h2>연동된 내역</h2></div><span className="detail-count">일정 {selectedEvents.length} · 결제 {selectedTransactions.length}</span></div><div className="linked-detail-list">{selectedEvents.map((event)=><div className="linked-detail-row" key={event.id}><i className={`event-line ${event.color||"mint"}`}/><span className="linked-detail-icon"><Icon name="calendar"/></span><div><b>{event.title}</b><small>{event.time||"종일"} · {event.owner}{event.calendarName?` · ${event.calendarName}`:event.googleEventId?" · Google Calendar":" · 앱 저장"}</small></div>{event.htmlLink?<a href={event.htmlLink} target="_blank" rel="noreferrer" aria-label={`${event.title} Google Calendar에서 열기`}>↗</a>:<span/>}</div>)}{selectedTransactions.map((item)=><div className="linked-detail-row" key={`transaction:${item.id}`}><i className="event-line payment"/><span className="linked-detail-icon payment"><Icon name="receipt"/></span><div><b>{item.merchant}</b><small>{item.owner} · {item.category}{item.paymentMethod?` · ${item.paymentMethod}`:""}</small></div><strong><Amount hidden={hidden}>-{money(item.amount)}원</Amount></strong></div>)}{!selectedEvents.length&&!selectedTransactions.length&&<p className="calendar-empty">이날 연동된 일정이나 결제 내역이 없습니다.</p>}</div></article>}
       <div className="section-title-row"><div><span className="eyebrow">다가오는 일정</span><h2>이번 달</h2></div>{!readOnly&&<button className="primary-button small" onClick={()=>onAdd()}>＋ 일정 추가</button>}</div>
-      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">등록된 가족 일정이 없습니다.</div>}</div>
+      <div className="event-list">{monthEvents.length?monthEvents.map(event=><article key={event.id} className="event-row"><time><strong>{Number(event.date.slice(-2))}</strong><small>{month+1}월</small></time><i className={`event-line ${event.color || "mint"}`} /><div><b>{event.title}</b><small>{event.time || "종일"} · {event.owner}{event.calendarName?` · ${event.calendarName}`:event.googleEventId?" · Google 동기화":" · 앱 저장"}</small></div>{!readOnly&&event.calendarWritable!==false&&<button type="button" className="event-delete" disabled={deletingId===event.id} onClick={()=>onDelete(event)} aria-label={`${event.title} 삭제`}>{deletingId===event.id?"…":"삭제"}</button>}</article>):<div className="calendar-empty">등록된 가족 일정이 없습니다.</div>}</div>
       <div className="calendar-legend"><span><i className="event-dot mint"/>일정</span><span><i className="payment-dot"/>결제 발생일 ({monthTransactions.length}건)</span></div>
       {!readOnly&&<a className="google-card" href="https://calendar.google.com" target="_blank" rel="noreferrer"><span className="google-mark">G</span><div><b>Google 캘린더에서 열기</b><small>공유 캘린더의 전체 일정을 확인하세요</small></div><span>↗</span></a>}
     </section>
@@ -849,6 +878,19 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(()=>{
+    const url = new URL(window.location.href);
+    const oauthResult = url.searchParams.get("calendarOAuth");
+    if (!oauthResult) return;
+    url.searchParams.delete("calendarOAuth");
+    window.history.replaceState({},"",`${url.pathname}${url.search}${url.hash}`);
+    const timer = window.setTimeout(()=>{
+      setTab("calendar");
+      setToast(oauthResult==="connected"?"Google 계정을 연결했습니다. 표시할 캘린더를 선택해 주세요.":"Google 계정을 연결하지 못했습니다. OAuth 설정과 승인 화면을 확인해 주세요.");
+    },0);
+    return ()=>window.clearTimeout(timer);
+  },[]);
+
   const activeTitle = useMemo(() => navItems.find((item)=>item.id===tab)?.label, [tab]);
 
   async function migrateStoredEvents(state:ServerState) {
@@ -967,8 +1009,11 @@ export default function Home() {
       const googleEvents=Array.isArray(result.events)?result.events:[];
       setEvents((current)=>{
         const preserved=current.filter((event)=>event.source!=="google"||!event.date.startsWith(monthKey));
-        const appGoogleIds=new Set(preserved.filter((event)=>event.source!=="google").map((event)=>event.googleEventId).filter(Boolean));
-        return [...preserved,...googleEvents.filter((event)=>!appGoogleIds.has(event.googleEventId))].sort((a,b)=>`${a.date}${a.time||""}`.localeCompare(`${b.date}${b.time||""}`));
+        const rawGoogleId=(reference:string|undefined)=>reference?.split("::").at(-1)||"";
+        const appEvents=preserved.filter((event)=>event.source!=="google"&&event.googleEventId);
+        const appGoogleRefs=new Set(appEvents.map((event)=>event.googleEventId));
+        const legacyGoogleIds=new Set(appEvents.filter((event)=>!event.googleEventId?.includes("::")).map((event)=>rawGoogleId(event.googleEventId)));
+        return [...preserved,...googleEvents.filter((event)=>!appGoogleRefs.has(event.googleEventId)&&!legacyGoogleIds.has(rawGoogleId(event.googleEventId)))].sort((a,b)=>`${a.date}${a.time||""}`.localeCompare(`${b.date}${b.time||""}`));
       });
       return true;
     }catch(error){
@@ -1140,8 +1185,8 @@ export default function Home() {
 
   async function addEvent(event: CalendarEvent) {
     const response = await fetch("/api/calendar", { method:"POST", headers:authHeaders(true), body:JSON.stringify(event) }).catch(()=>null);
-    const result = response ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string };error?:string }|null : null;
-    const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.id} : event;
+    const result = response ? await response.json().catch(()=>null) as { configured?:boolean; event?:{ id?:string;ref?:string;calendarName?:string };error?:string }|null : null;
+    const savedEvent = result?.event?.id ? {...event,googleEventId:result.event.ref||result.event.id,calendarName:result.event.calendarName} : event;
     const backendResponse = await fetch("/backend/events",{method:"POST",headers:authHeaders(true),body:JSON.stringify(savedEvent)});
     const backendResult = await backendResponse.json().catch(()=>({}));
     if(!backendResponse.ok || !backendResult.event) {
@@ -1201,6 +1246,22 @@ export default function Home() {
     } finally { setBusy(""); }
   }
 
+  async function saveCalendarConfig(selectedCalendarIds:string[],writeCalendarId:string) {
+    setBusy("calendar-config");
+    try {
+      const response = await fetch("/api/calendar",{method:"PUT",headers:authHeaders(true),body:JSON.stringify({selectedCalendarIds,writeCalendarId})});
+      const result = await response.json().catch(()=>({})) as CalendarConnectionStatus&{error?:string};
+      if (!response.ok) throw new Error(result.error||result.message||"캘린더 선택을 저장하지 못했습니다.");
+      setCalendarStatus(result);
+      setServerState((current)=>current?{...current,integrations:{...current.integrations,google_calendar:calendarIntegration(result)}}:current);
+      setToast("표시할 Google 캘린더를 저장했습니다.");
+      return true;
+    } catch(error) {
+      setToast(error instanceof Error?error.message:"캘린더 선택을 저장하지 못했습니다.");
+      return false;
+    } finally { setBusy(""); }
+  }
+
   function openEventModal(date = seoulDateKey()) {
     setEventDate(date);
     setModal(true);
@@ -1245,7 +1306,7 @@ export default function Home() {
         {tab === "ledger" && <Ledger hidden={hidden} readOnly={!isAdmin} transactions={transactions} allTransactionsLoaded={allTransactionsLoaded} loadingTransactions={loadingTransactions} onImport={importFile} onLoadAll={loadAllTransactions} />}
         {tab === "crypto" && <Crypto hidden={hidden} readOnly={!isAdmin} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} readOnly={!isAdmin} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}
-        {tab === "calendar" && <CalendarScreen events={visibleEvents} transactions={transactions} hidden={hidden} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onMonthChange={loadCalendarMonth} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
+        {tab === "calendar" && <CalendarScreen events={visibleEvents} transactions={transactions} hidden={hidden} readOnly={!isAdmin} status={calendarStatus} checking={busy==="calendar"||busy==="calendar-config"} deletingId={deletingEventId} onCheck={()=>void checkCalendar()} onCalendarConfig={saveCalendarConfig} onMonthChange={loadCalendarMonth} onAdd={openEventModal} onDelete={(event)=>void deleteEvent(event)} />}
         {tab === "settings" && <Settings protectedMode={protectedMode} integrations={serverState?.integrations||{}} busy={busy} onProbe={probeIntegrations} />}
       </div>
 

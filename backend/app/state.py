@@ -102,9 +102,15 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
             "last_checked_at": _iso(last_alert.created_at) if last_alert else "",
         },
         "google_calendar": {
-            "configured": bool(settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key),
+            "configured": bool(
+                (settings.google_oauth_client_id and settings.google_oauth_client_secret)
+                or (settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key)
+            ),
             "connected": False,
-            "message": "앱에서 연결 확인 필요" if settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key else "설정 필요",
+            "message": "앱에서 연결 확인 필요" if (
+                (settings.google_oauth_client_id and settings.google_oauth_client_secret)
+                or (settings.google_calendar_id and settings.google_service_account_email and settings.google_private_key)
+            ) else "설정 필요",
         },
     }
 
