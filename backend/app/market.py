@@ -219,6 +219,7 @@ def _maybe_send_target_alert(db: Session, holding: Holding, price: float) -> tup
 
 
 def refresh_market(db: Session) -> dict[str, Any]:
+    from .price_alerts import check_price_rules
     try:
         exchange = refresh_exchange_rate(db)
     except Exception:
@@ -264,10 +265,14 @@ def refresh_market(db: Session) -> dict[str, Any]:
             holding.return_rate = (
                 (holding.market_value - holding.principal) / holding.principal if holding.principal else 0
             )
+        previous_price = holding.current_price if holding.price_updated_at else None
         holding.current_price = price
         holding.price_source = "yfinance"
         holding.price_updated_at = now
         sent, failed = _maybe_send_target_alert(db, holding, price)
+        alerts_sent += sent
+        alerts_failed += failed
+        sent, failed = check_price_rules(db, holding, price, previous_price)
         alerts_sent += sent
         alerts_failed += failed
         updated += 1

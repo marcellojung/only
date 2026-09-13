@@ -1,5 +1,7 @@
 # Windows PC + Tailscale Funnel 무료 운영
 
+현재 PC에서는 바탕화면 **모아 자산.exe**로 시작·종료·재시작할 수 있습니다. [실행기와 자동화 사용법](IMPLEMENTATION.md)을 먼저 참고하세요. 아래 명령은 새 PC 설치와 관리자 유지보수용이며, 프로젝트 루트에서 실행합니다. 앱 종료 시 기존 Tailscale Funnel 설정은 유지됩니다.
+
 이 구성은 공유기 포트와 별도 도메인을 사용하지 않고 Tailscale Funnel의 `https://...ts.net` 주소로 앱을 엽니다. Tailscale은 Windows 서버에만 설치하며 가족 아이폰에는 설치하지 않아도 됩니다. Windows PC가 켜져 있고 사용자 로그인이 유지되는 동안 사용할 수 있습니다.
 
 ## 1. Windows에 필수 프로그램 설치

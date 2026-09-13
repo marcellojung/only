@@ -20,6 +20,25 @@ function dateLabel(value: string) {
   return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" }).format(new Date(value));
 }
 
+function ResearchFilter() {
+  const [keywords, setKeywords] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let active = true;
+    void request<{ keywords: string }>("/research/settings").then(data => { if (active) { setKeywords(data.keywords); setLoaded(true); } }).catch(error => { if (active) setMessage(error.message); });
+    return () => { active = false; };
+  }, []);
+  async function save() {
+    setBusy(true);
+    try { await request("/research/settings", "PUT", { keywords }); setMessage("키워드를 저장했습니다."); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "저장 실패"); }
+    finally { setBusy(false); }
+  }
+  return <div><label className="automation-time">제목 키워드 (비우면 전체)<input aria-label="뉴스·공시 키워드" value={keywords} maxLength={300} disabled={!loaded || busy} onChange={event => setKeywords(event.target.value)} placeholder="실적,수주,배당" /></label><button type="button" className="text-button" disabled={!loaded || busy} onClick={() => void save()}>키워드 저장</button><p>최근 3일의 새 항목을 최대 15건씩 모읍니다. 이미 발송한 항목은 제외합니다.</p>{message && <p role="status">{message}</p>}</div>;
+}
+
 export function TelegramAction({ kind, holdingId, label = "텔레그램으로 보내기", onSent }: { kind: string; holdingId?: number; label?: string; onSent?: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,7 +47,7 @@ export function TelegramAction({ kind, holdingId, label = "텔레그램으로 �
   const [attempted, setAttempted] = useState(false);
   async function prepare() {
     setBusy(true); setMessage(""); setSent(false); setAttempted(false);
-    try { setPreview(await request<Preview>("/previews", "POST", { kind, holding_id: holdingId })); }
+    try { setPreview(await request<Preview>("/previews", "POST", { kind, holding_id: holdingId, app_url: window.location.origin })); }
     catch (error) { setMessage(error instanceof Error ? error.message : "미리보기 실패"); }
     finally { setBusy(false); }
   }
@@ -81,7 +100,7 @@ export default function AutomationPanel() {
     catch (error) { setMessage(error instanceof Error ? error.message : "새로고침 실패"); }
     finally { setBusy(""); }
   }
-  const labels: Record<string, string> = { target_price: "목표가 알림", connection_test: "연결 테스트", morning_brief: "아침 브리핑", evening_brief: "저녁 요약", holding_report: "종목 분석", portfolio_analysis: "AI 분석", auto_refresh: "시세 갱신" };
+  const labels: Record<string, string> = { target_price: "목표가 알림", stop_loss: "손절 기준", buy_below: "하락 매수가", change_percent: "변동률", research_digest: "뉴스·공시", connection_test: "연결 테스트", morning_brief: "아침 브리핑", evening_brief: "저녁 요약", holding_report: "종목 분석", portfolio_analysis: "AI 분석", auto_refresh: "시세 갱신" };
   const statuses: Record<string, string> = { succeeded: "완료", failed: "실패", running: "처리 중 · 중단됐다면 결과 확인 필요", uncertain: "발송 결과 확인 필요", cancelled: "취소" };
   return <section className="automation-panel" aria-label="자동 작업과 텔레그램">
     <div className="automation-heading"><div><span className="eyebrow">자동화</span><h2>필요한 소식만 받아보기</h2></div><button type="button" className="text-button" disabled={!!busy} onClick={() => void refresh()}>새로고침</button></div>
@@ -90,11 +109,12 @@ export default function AutomationPanel() {
     {!jobs && !message && <p>자동 작업 설정을 불러오고 있어요…</p>}
     <div className="automation-jobs">{jobs?.map(job => <article className="automation-job" key={job.key}>
       <div className="automation-heading"><h3>{job.label}</h3><button type="button" role="switch" aria-label={job.label} aria-checked={job.enabled} disabled={!!busy} className={`automation-switch ${job.enabled ? "on" : ""}`} onClick={() => void save(job, !job.enabled)}>{job.enabled ? "켜짐" : "꺼짐"}</button></div>
-      {job.key === "price_alerts" ? <p>시세 갱신 시 보유 종목의 목표가 도달을 확인합니다.</p> : <>
+      {job.key === "price_alerts" ? <p>시세 갱신 시 목표가·손절가·하락 매수가·변동률 조건을 확인합니다. 종목 카드에서 조건을 설정하세요.</p> : <>
         <label className="automation-time">실행 시간<input aria-label={`${job.label} 실행 시간`} value={job.times} placeholder="08:00,21:30" maxLength={150} disabled={!!busy} onChange={event => setJobs(current => current?.map(item => item.key === job.key ? { ...item, times: event.target.value } : item) ?? null)} /></label>
         <div className="automation-heading"><small>{job.next_run ? `다음 ${dateLabel(job.next_run)}` : "예약 꺼짐"}</small><button type="button" className="text-button" disabled={!!busy} onClick={() => void save(job, job.enabled)}>시간 저장</button></div>
       </>}
-      {(job.key === "morning_brief" || job.key === "evening_brief") && <TelegramAction kind={job.key} label="미리보기 · 지금 보내기" onSent={() => void refresh()} />}
+      {job.key === "research_digest" && <ResearchFilter />}
+      {["morning_brief", "evening_brief", "research_digest"].includes(job.key) && <TelegramAction kind={job.key} label="미리보기 · 지금 보내기" onSent={() => void refresh()} />}
     </article>)}</div>
     {message && <p className="automation-notice" role="status">{message}</p>}
     <details className="automation-history"><summary>최근 발송 이력 ({history?.alerts.length ?? 0})</summary>

@@ -2,6 +2,7 @@
 
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import AutomationPanel, { TelegramAction } from "./components/AutomationPanel";
+import PriceAlertSettings from "./components/PriceAlertSettings";
 
 type TabId =
   | "summary"
@@ -449,6 +450,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
       <button className="primary-button small">저장</button>
       <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
     </form>}
+    {!readOnly&&editing&&<PriceAlertSettings holdingId={item.id} currency={item.currency} />}
   </article>;
 }
 

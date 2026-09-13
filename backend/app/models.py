@@ -228,3 +228,38 @@ class TelegramPreview(Base):
     job_key: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class HoldingAlertRule(Base):
+    __tablename__ = "holding_alert_rules"
+    __table_args__ = (UniqueConstraint("holding_id", "kind", name="uq_holding_alert_kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    holding_id: Mapped[int] = mapped_column(ForeignKey("holdings.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    threshold: Mapped[float] = mapped_column(Float, default=0)
+    generation: Mapped[str] = mapped_column(String(40))
+
+
+class ResearchPreference(Base):
+    __tablename__ = "research_preferences"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
+class ResearchItem(Base):
+    __tablename__ = "research_items"
+    fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source: Mapped[str] = mapped_column(String(20))
+    company: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    published_at: Mapped[str] = mapped_column(String(50))
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    delivery_run_id: Mapped[int | None] = mapped_column(ForeignKey("automation_runs.id"), nullable=True)
+
+
+class ResearchPreviewItem(Base):
+    __tablename__ = "research_preview_items"
+    preview_id: Mapped[str] = mapped_column(ForeignKey("telegram_previews.id", ondelete="CASCADE"), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(ForeignKey("research_items.fingerprint"), primary_key=True)

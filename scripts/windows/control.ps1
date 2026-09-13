@@ -1,4 +1,4 @@
-﻿param([ValidateSet('Start','Stop','Restart','Status')][string]$Action = 'Start')
+﻿param([ValidateSet('Start','Stop','Restart','Status')][string]$Action = 'Start', [string]$ResultFile = '')
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
@@ -7,6 +7,12 @@ $InstanceFile = Join-Path $DataDirectory 'only-launcher.json'
 $StopFile = Join-Path $DataDirectory 'only-stop.json'
 $ServeScript = Join-Path $ProjectRoot 'scripts\serve.mjs'
 Set-Location -LiteralPath $ProjectRoot
+if ($ResultFile) {
+    $ResultFile = [IO.Path]::GetFullPath($ResultFile)
+    if ([IO.Path]::GetDirectoryName($ResultFile) -ne $DataDirectory -or [IO.Path]::GetFileName($ResultFile) -notmatch '^launcher-command-[a-f0-9]{32}\.tmp$') {
+        throw '실행 결과 파일 경로가 올바르지 않습니다.'
+    }
+}
 
 function Test-AppReady {
     try {
@@ -16,10 +22,15 @@ function Test-AppReady {
 }
 function Get-OwnedInstance {
     if (-not (Test-Path -LiteralPath $InstanceFile)) { return $null }
-    $Record = Get-Content -LiteralPath $InstanceFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    try { $Record = Get-Content -LiteralPath $InstanceFile -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { if (-not (Test-Path -LiteralPath $InstanceFile)) { return $null }; throw }
+    if (-not $Record -or [int]$Record.pid -le 0) { return $null }
     if ($Record.root -ne $ProjectRoot -or -not $Record.instance) { throw '실행 기록의 프로젝트 경로를 확인해 주세요.' }
     $Running = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$Record.pid)"
     if (-not $Running) { return $null }
+    # Windows can briefly return an exiting process with no command line or
+    # creation time. Treat it as unowned instead of dereferencing null.
+    if (-not $Running.CommandLine -or -not $Running.CreationDate) { return $null }
     if ($Running.Name -ne 'node.exe' -or -not $Running.CommandLine.Contains($ServeScript)) { throw 'PID가 다른 프로그램에 사용 중입니다. 해당 프로그램은 종료하지 않습니다.' }
     $Started = [DateTimeOffset]::Parse($Record.startedAt).UtcDateTime
     if ([Math]::Abs(($Running.CreationDate.ToUniversalTime() - $Started).TotalSeconds) -gt 15) { throw '실행 기록과 프로세스 시작 시각이 다릅니다.' }
@@ -34,7 +45,10 @@ function Stop-App {
     [IO.File]::WriteAllText($StopFile, (@{ instance = $Record.instance } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
     for ($Attempt = 0; $Attempt -lt 60; $Attempt++) {
         Start-Sleep -Milliseconds 500
-        if (-not (Get-OwnedInstance)) { Write-Output '앱을 종료했습니다.'; return }
+        if (-not (Get-OwnedInstance)) {
+            $RemainingListeners = Get-NetTCPConnection -State Listen -LocalPort 3000,8000 -ErrorAction SilentlyContinue
+            if (-not $RemainingListeners) { Write-Output '앱을 종료했습니다.'; return }
+        }
     }
     throw '종료 대기 시간이 초과되었습니다. 실행 로그를 확인해 주세요.'
 }
@@ -58,14 +72,20 @@ function Start-App {
 }
 $Gate = [Threading.Mutex]::new($false, 'Local\MoaOnlyLauncherControl')
 $Acquired = $false
+$CommandExitCode = 0
+$CommandOutput = @()
 try {
     try { $Acquired = $Gate.WaitOne(0) } catch [Threading.AbandonedMutexException] { $Acquired = $true }
     if (-not $Acquired) { throw '다른 실행/종료 작업이 진행 중입니다. 잠시 후 다시 눌러 주세요.' }
-    switch ($Action) {
+    $CommandOutput = @(switch ($Action) {
         'Start' { Start-App }
         'Stop' { Stop-App }
         'Restart' { Stop-App; Start-App }
         'Status' { if (Test-AppReady) { Write-Output '실행 중' } else { Write-Output '중지 또는 준비 중' } }
-    }
-} catch { Write-Output $_.Exception.Message; exit 1 }
+    })
+} catch { $CommandOutput = @($_.Exception.Message); $CommandExitCode = 1 }
 finally { if ($Acquired) { $Gate.ReleaseMutex() }; $Gate.Dispose() }
+if ($ResultFile) {
+    [IO.File]::WriteAllText($ResultFile, ($CommandOutput -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+} else { $CommandOutput | Write-Output }
+exit $CommandExitCode

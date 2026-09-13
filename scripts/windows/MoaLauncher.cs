@@ -62,20 +62,31 @@ internal sealed class MoaLauncher : Form
     {
         string script = Path.Combine(projectRoot, "scripts", "windows", "control.ps1");
         if (!File.Exists(script)) throw new FileNotFoundException("프로젝트 실행 파일이 없습니다. 프로젝트를 이동했다면 실행기를 다시 만들어 주세요.");
+        string resultFile = Path.Combine(projectRoot, "data", "launcher-command-" + Guid.NewGuid().ToString("N") + ".tmp");
+        Directory.CreateDirectory(Path.GetDirectoryName(resultFile));
         var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
-            Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Action " + action,
+            Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Action " + action + " -ResultFile \"" + resultFile + "\"",
             WorkingDirectory = projectRoot, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+            // Background descendants may inherit redirected pipes and prevent
+            // ReadToEnd from completing after PowerShell has already exited.
+            RedirectStandardOutput = false, RedirectStandardError = false
         };
-        using (var process = Process.Start(info))
+        try
         {
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
-            return Tuple.Create(process.ExitCode, output.Result + error.Result);
+            using (var process = Process.Start(info))
+            {
+                if (!process.WaitForExit(120000))
+                {
+                    // Stop only this command runner, not its server tree.
+                    try { process.Kill(); process.WaitForExit(5000); } catch { }
+                    return Tuple.Create(1, "작업 응답 시간이 초과되었습니다. 앱 열기 또는 로그 보기로 상태를 확인해 주세요.");
+                }
+                string message = File.Exists(resultFile) ? File.ReadAllText(resultFile, Encoding.UTF8) : "실행 결과를 확인하지 못했습니다. 로그를 확인해 주세요.";
+                return Tuple.Create(process.ExitCode, message);
+            }
         }
+        finally { try { if (File.Exists(resultFile)) File.Delete(resultFile); } catch { } }
     }
     [STAThread]
     public static int Main(string[] args)

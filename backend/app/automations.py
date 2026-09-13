@@ -17,15 +17,16 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .history import calculate_summary
-from .models import AIAnalysis, AlertEvent, AutomationRun, AutomationSetting, Holding, PortfolioSnapshot, TelegramPreview, utcnow
+from .models import AIAnalysis, AlertEvent, AutomationRun, AutomationSetting, Holding, PortfolioSnapshot, ResearchPreviewItem, TelegramPreview, utcnow
 from .telegram import send_telegram_message, telegram_configured
 
 SEOUL = ZoneInfo("Asia/Seoul")
 JOB_DEFAULTS = {
     "auto_refresh": ("자동 시세 갱신", settings.auto_refresh_enabled, settings.auto_refresh_times),
-    "price_alerts": ("목표가 알림", True, ""),
-    "morning_brief": ("아침 시장 브리핑", False, "08:00"),
-    "evening_brief": ("저녁 자산 요약", False, "21:30"),
+    "price_alerts": ("가격 조건 알림", True, ""),
+    "morning_brief": ("아침 시장 브리핑", False, "07:30"),
+    "evening_brief": ("저녁 자산 요약", False, "21:00"),
+    "research_digest": ("보유 종목 뉴스·공시", False, "07:30,21:00"),
 }
 
 
@@ -148,7 +149,8 @@ def holding_brief(db: Session, holding_id: int) -> str:
     return "\n".join(lines)
 
 
-def create_preview(db: Session, key: str, holding_id: int | None = None) -> dict:
+def create_preview(db: Session, key: str, holding_id: int | None = None, app_url: str = "") -> dict:
+    research_items = []
     if key == "morning_brief":
         text = market_brief()
     elif key == "evening_brief":
@@ -160,10 +162,19 @@ def create_preview(db: Session, key: str, holding_id: int | None = None) -> dict
         if not analysis:
             raise ValueError("먼저 포트폴리오 AI 분석을 실행해 주세요.")
         text = "[모아 포트폴리오 분석]\n" + analysis.result
+    elif key == "research_digest":
+        from .research_alerts import collect_research, research_message
+        research_items, warnings = collect_research(db)
+        text = research_message(research_items, warnings)
     else:
         raise ValueError("미리보기를 만들 수 없는 항목입니다.")
+    if app_url:
+        text += f"\n\n모아에서 보기: {app_url}"
     record = TelegramPreview(id=str(uuid4()), job_key=key, text=text)
     db.add(record)
+    db.flush()
+    for item in research_items:
+        db.add(ResearchPreviewItem(preview_id=record.id, fingerprint=item.fingerprint))
     db.commit()
     return {"id": record.id, "text": record.text, "job_key": key, "expires_in_minutes": 30}
 
@@ -202,6 +213,11 @@ def send_preview(db: Session, preview_id: str) -> dict:
     run = claim_run(db, preview.job_key, f"preview:{preview.id}", preview.text)
     if run is None:
         raise ValueError("이미 발송을 요청한 미리보기입니다. 발송 이력을 확인해 주세요.")
+    if preview.job_key == "research_digest":
+        from .research_alerts import reserve_items
+        fingerprints = list(db.scalars(select(ResearchPreviewItem.fingerprint).where(ResearchPreviewItem.preview_id == preview.id)))
+        if not reserve_items(db, run, fingerprints):
+            raise ValueError(run.result)
     return finish_delivery(db, run, preview.text)
 
 
@@ -218,12 +234,28 @@ def run_scheduled(db: Session, key: str, slot: str) -> None:
             run.status, run.result, run.finished_at = "succeeded", str(result), utcnow()
             db.commit()
         else:
-            message = market_brief() if key == "morning_brief" else asset_brief(db)
+            research_items = []
+            if key == "research_digest":
+                from .research_alerts import collect_research, research_message
+                research_items, warnings = collect_research(db)
+                if not research_items:
+                    run.status, run.result, run.finished_at = "succeeded", "새 소식 없음" + (" · 일부 조회 실패 또는 설정 필요" if warnings else ""), utcnow()
+                    db.commit()
+                    return
+                message = research_message(research_items, warnings)
+            else:
+                message = market_brief() if key == "morning_brief" else asset_brief(db)
             db.expire_all()
             if not job_setting(db, key)["enabled"]:
                 run.status, run.result, run.finished_at = "cancelled", "발송 전에 자동 작업을 껐습니다.", utcnow()
                 db.commit()
                 return
+            if research_items:
+                from .research_alerts import reserve_items
+                if not telegram_configured():
+                    raise ValueError("텔레그램 설정 필요")
+                if not reserve_items(db, run, [item.fingerprint for item in research_items]):
+                    return
             finish_delivery(db, run, message)
     except Exception as exc:
         db.rollback()

@@ -190,6 +190,19 @@ def _disclosures(client: httpx.Client, corp_code: str) -> list[dict[str, str]]:
     return [{"title": str(item.get("report_nm") or "공시"), "date": str(item.get("rcept_dt") or ""), "submitter": str(item.get("flr_nm") or ""), "url": f"{DART_VIEWER_BASE}?rcpNo={quote(str(item.get('rcept_no') or ''))}"} for item in (payload.get("list") or [])[:8] if item.get("rcept_no")]
 
 
+def recent_holding_disclosures(holding: Holding) -> dict:
+    """Fetch only disclosures for alerts, without downloading financial reports."""
+    stock_code = korean_stock_code(holding)
+    if not stock_code or not settings.opendart_api_key:
+        return {"items": [], "message": "국내 종목코드 또는 OpenDART 설정 필요"}
+    try:
+        with httpx.Client(timeout=12) as client:
+            corp_code = _corp_codes(client).get(stock_code)
+            return {"items": _disclosures(client, corp_code) if corp_code else [], "message": "조회 완료"}
+    except (httpx.HTTPError, OpenDartError) as exc:
+        return {"items": [], "message": f"공시 조회 실패: {type(exc).__name__}"}
+
+
 def build_holding_report(holding: Holding, client: httpx.Client | None = None) -> dict[str, Any]:
     stock_code = korean_stock_code(holding)
     base: dict[str, Any] = {"holding_id": holding.id, "name": holding.name, "ticker": holding.ticker, "stock_code": stock_code, "generated_at": datetime.now().isoformat(timespec="seconds"), "llm_required": False, "broker_research": broker_research_links(holding), "dart": {"configured": bool(settings.opendart_api_key), "available": False, "message": "", "company": None, "basis": "", "metrics": [], "ratios": [], "analysis": None, "disclosures": []}}
