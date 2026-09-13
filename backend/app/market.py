@@ -185,8 +185,11 @@ def refresh_holding_quote(db: Session, holding: Holding) -> bool:
 
 
 def _maybe_send_target_alert(db: Session, holding: Holding, price: float) -> tuple[int, int]:
+    from .automations import job_setting
+
     if (
-        not holding.target_alert_enabled
+        not job_setting(db, "price_alerts")["enabled"]
+        or not holding.target_alert_enabled
         or holding.target_price <= 0
         or price < holding.target_price
         or holding.target_alert_sent_at is not None

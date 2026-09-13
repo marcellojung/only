@@ -197,3 +197,34 @@ class AlertEvent(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     response_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class AutomationSetting(Base):
+    __tablename__ = "automation_settings"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    times: Mapped[str] = mapped_column(String(150), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AutomationRun(Base):
+    __tablename__ = "automation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(180), unique=True)
+    job_key: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="running")
+    message: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TelegramPreview(Base):
+    __tablename__ = "telegram_previews"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    job_key: Mapped[str] = mapped_column(String(40))
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

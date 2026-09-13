@@ -168,3 +168,26 @@ button { color: inherit; }
 /* 프롬프트 복사 · 결제 전체보기 · 결제 캘린더 */
 .prompt-content button:last-child{width:100%;min-height:38px;margin:0}.copy-status{margin:10px 0 0;padding:10px 12px;border-radius:11px;font-size:9px;line-height:1.5}.copy-status.success{background:#e4efe7;color:#35694e}.copy-status.error{background:#f5e5df;color:#8b5142}.ledger-view-actions{display:flex;align-items:center;gap:6px}.ledger-view-actions .text-button{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border-radius:10px}.ledger-view-actions .text-button.active{background:#e3ebe5;color:var(--forest)}.payment-calendar-wrap{display:grid;gap:13px}.payment-calendar-toolbar{margin-bottom:0}.payment-calendar .calendar-grid>div>button{gap:2px}.payment-calendar .calendar-grid>div>button small{max-width:100%;overflow:hidden;color:#a6604d;font-size:7px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}.payment-calendar .calendar-grid>div>button.selected{background:#e4ece6;box-shadow:inset 0 0 0 1px #aac0b0}.payment-dot{display:block;width:5px;height:5px;flex:0 0 5px;border-radius:50%;background:#e19172}.payment-calendar-summary{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:18px;background:#f1dfd5}.payment-calendar-summary h3{margin:3px 0 0;font-size:13px}.payment-calendar-summary strong{font-size:15px}.calendar-transactions{margin-top:0}.empty-payment-day{margin:0;padding:28px;text-align:center;color:var(--muted);font-size:10px}.event-dots .payment-dot{width:4px;height:4px;flex-basis:4px}.calendar-grid .today .payment-dot{background:#ffd0b9}.calendar-legend{display:flex;align-items:center;gap:16px;padding:4px 7px;color:var(--muted);font-size:9px}.calendar-legend span{display:flex;align-items:center;gap:6px}
 .owner-spending-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}.owner-spending-summary article{display:flex;align-items:center;gap:10px;padding:12px 13px;border:1px solid var(--line);border-radius:16px;background:var(--card)}.owner-spending-avatar{width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;border-radius:11px;background:#dfe9e2;color:#315f48;font-size:10px;font-weight:900}.owner-spending-avatar.owner-지우{background:#f2dfdb;color:#855143}.owner-spending-avatar.owner-윤재{background:#e3e7f2;color:#52668c}.owner-spending-avatar.owner-공통{background:#eee7d5;color:#765f29}.owner-spending-summary article div{min-width:0;flex:1}.owner-spending-summary b,.owner-spending-summary small{display:block}.owner-spending-summary b{font-size:10px}.owner-spending-summary small{margin-top:2px;color:var(--muted);font-size:8px}.owner-spending-summary strong{font-size:11px}
+/* Persistent automation controls */
+.automation-panel { margin: 24px 0; padding: 24px; background: #fff; border: 1px solid #e2e8e4; border-radius: 22px; }
+.automation-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.automation-heading h2, .automation-heading h3 { margin: 4px 0; }
+.automation-description, .automation-job p, .telegram-preview p { color: #626e66; font-size: 13px; line-height: 1.7; }
+.automation-jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+.automation-job { padding: 18px; background: #f7faf8; border: 1px solid #e4ebe6; border-radius: 16px; min-width: 0; }
+.automation-job h3 { font-size: 15px; }
+.automation-switch { border: 0; border-radius: 20px; padding: 8px 16px; background: #e5e9e6; color: #556159; cursor: pointer; min-width: 68px; }
+.automation-switch.on { background: #247b58; color: white; }
+.automation-time { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #58685d; margin: 15px 0 8px; }
+.automation-time input { width: 100%; min-width: 0; border: 1px solid #d5dfd8; background: #fff; border-radius: 9px; padding: 10px; font: inherit; font-size: 14px; }
+.automation-job small { font-size: 11px; color: #66766c; }
+.automation-notice { padding: 12px 14px; border-radius: 10px; background: #edf3ee; color: #365d44; font-size: 13px; overflow-wrap: anywhere; }
+.telegram-action { margin-top: 10px; min-width: 0; }
+.telegram-preview { margin-top: 12px; border: 1px solid #ccdcd1; border-radius: 12px; padding: 14px; background: #fff; }
+.telegram-preview pre, .automation-history pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 13px; line-height: 1.75; max-height: 360px; overflow-y: auto; }
+.automation-history { margin-top: 16px; border-top: 1px solid #e1e9e3; padding-top: 16px; }
+.automation-history summary { cursor: pointer; font-size: 14px; padding: 5px 0; }
+.automation-history article { padding: 13px 0; border-bottom: 1px solid #edf1ed; overflow-wrap: anywhere; }
+.automation-history small { display: block; color: #66756b; margin-top: 6px; font-size: 12px; }
+.automation-history p { font-size: 12px; color: #67746b; }
+@media (max-width: 680px) { .automation-panel { padding: 18px; } .automation-jobs { grid-template-columns: 1fr; } .automation-heading h2 { font-size: 19px; } }

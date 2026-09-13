@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import AutomationPanel, { TelegramAction } from "./components/AutomationPanel";
 
 type TabId =
   | "summary"
@@ -451,7 +452,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
   </article>;
 }
 
-function StockReportModal({ item, report, loading, error, onClose }: { item: HoldingData; report: StockReport | null; loading: boolean; error: string; onClose:()=>void }) {
+function StockReportModal({ item, report, loading, error, readOnly, onClose }: { item: HoldingData; report: StockReport | null; loading: boolean; error: string; readOnly: boolean; onClose:()=>void }) {
   const [copiedPrompt,setCopiedPrompt] = useState("");
   const [copyMessage,setCopyMessage] = useState("");
   async function copyPrompt(id:string,text:string) {
@@ -473,6 +474,7 @@ function StockReportModal({ item, report, loading, error, onClose }: { item: Hol
     {loading&&<div className="report-loading"><i/><p>공시와 재무제표를 불러오는 중이에요.</p></div>}
     {error&&<div className="report-notice error">{error}</div>}
     {!loading&&report&&<div className="report-body">
+      {!readOnly&&<TelegramAction kind="holding_report" holdingId={item.id} />}
       <section className="report-section"><div className="report-title"><div><span className="eyebrow">OpenDART · LLM 불필요</span><h3>상세 종목 분석</h3></div>{report.dart.basis&&<span className="chip">{report.dart.basis}</span>}</div><p className={`report-notice ${report.dart.available?"ready":""}`}>{report.dart.message}</p>
         {report.dart.available&&<><div className="report-metrics">{report.dart.metrics.map((metric)=><article key={metric.key}><span>{metric.label}</span><strong>{compactMoney(metric.current)}</strong><small className={metric.change_rate==null?"":metric.change_rate<0?"negative":"positive"}>{metric.change_rate==null?"전년 비교 없음":`전년 대비 ${metric.change_rate>=0?"+":""}${(metric.change_rate*100).toFixed(1)}%`}</small></article>)}</div><div className="ratio-row">{report.dart.ratios.map((ratio)=><span key={ratio.label}><small>{ratio.label}</small><b>{(ratio.value*100).toFixed(1)}%</b></span>)}</div>{report.dart.analysis&&<div className="report-analysis"><div><h4>확인된 흐름</h4><ul>{report.dart.analysis.observations.map((text)=><li key={text}>{text}</li>)}</ul></div><div><h4>함께 볼 점</h4><ul>{report.dart.analysis.cautions.map((text)=><li key={text}>{text}</li>)}</ul></div></div>}</>}
       </section>
@@ -552,7 +554,7 @@ function Stocks({ hidden, readOnly, ownerFilter, onOwnerFilter, holdings, hidden
         </div>
         {holdings.length>6&&<p className="allocation-note">가독성을 위해 평가액 상위 6개 종목을 표시하고, 나머지 {holdings.length-6}개 종목은 기타로 합쳤어요.</p>}
       </article>}
-      {!readOnly&&analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre></article>}
+      {!readOnly&&analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre><TelegramAction kind="portfolio_analysis" /></article>}
       {!readOnly&&(promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>)}
       <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div>{!readOnly&&<button className="primary-button small" onClick={onAdd}>＋ 자산 추가</button>}</div>
       <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} readOnly={readOnly} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">{readOnly?"내 이름으로 등록된 투자자산이 없습니다.":"뱅크샐러드 파일을 올리거나 자산을 직접 추가해 주세요."}</article>}</div>
@@ -710,7 +712,7 @@ const integrationLabels: Record<string,[string,string,string]> = {
   database:["S","SQLite 누적 저장","자산·가계부·분석·알림 이력"],
   bank_salad:["X","뱅크샐러드 업로드","가계부·자산 현황"],
   market:["↗","환율·현재가","Yahoo Finance / yfinance"],
-  auto_refresh:["↻","4시간 자동 시세 갱신","한국시간 정시 스케줄"],
+  auto_refresh:["↻","자동 시세 갱신","한국시간 예약 실행"],
   openai:["AI","AI 포트폴리오 분석","OpenAI 또는 로컬 분석"],
   gowalter:["G","Gowalter 관점 아카이브","블로그·투자 원칙·어록"],
   opendart:["D","OpenDART 기업 리포트","공시·재무제표 기반 정형 분석"],
@@ -741,6 +743,7 @@ function Settings({ protectedMode, integrations, busy, onProbe }: { protectedMod
   return (
     <section className="screen fade-in">
       <ScreenHeading eyebrow="설정" title="우리 집 데이터 관리" copy="연동 상태와 보안 설정을 한곳에서 확인해요." />
+      <AutomationPanel />
       <article className="profile-panel"><div className="couple-avatars"><span className="avatar man">성</span><span className="avatar woman">지</span><span className="avatar child">윤</span></div><div><b>성근 · 지우 · 윤재의 집</b><small>FastAPI + SQLite 비공개 자산 서버</small></div><span className="secure-badge">비공개</span></article>
       <div className="settings-group"><div className="settings-title"><h2>외부 연동 상태</h2><button className="text-button" disabled={Boolean(busy)} onClick={onProbe}>{busy==="probe"?"확인 중…":"실제 연결 확인"}</button></div>{Object.entries(integrations).map(([key,status])=>{const label=integrationLabels[key]||["·",key,""];return <button key={key}><span className={`settings-symbol ${key==="google_calendar"?"google":key==="bank_salad"?"excel":"server"}`}>{label[0]}</span><div><b>{label[1]}</b><small>{label[2]}{key==="auto_refresh"&&status.detail?` · ${status.detail}`:""}{status.last_checked_at?` · 최근 ${status.last_checked_at.slice(0,16).replace("T"," ")}`:""}</small></div><em className={status.connected?"connected":""}>{status.message}</em></button>})}</div>
       <div className="settings-group"><h2>보안 및 저장</h2><button><span className="settings-symbol privacy">●</span><div><b>가족별 로그인</b><small>{protectedMode?"HttpOnly 보안 세션으로 로그인 상태 보호":"현재 로컬 모드"}</small></div><em className={protectedMode?"connected":""}>{protectedMode?"보호 중":"비밀번호 설정 필요"}</em></button><button><span className="settings-symbol server">DB</span><div><b>누적 데이터</b><small>업로드·시세·AI·알림 결과를 삭제 없이 기록</small></div><em className="connected">SQLite</em></button><button type="button" className={`tailscale-row ${funnelGuideOpen?"expanded":""}`} aria-expanded={funnelGuideOpen} onClick={()=>setFunnelGuideOpen((open)=>!open)}><span className="settings-symbol tailscale">TS</span><div><b>앱 설치 없는 외부 접속</b><small>{usingFunnelAddress?currentOrigin:"Tailscale Funnel 공개 HTTPS 주소"}</small></div><em className={usingFunnelAddress?"connected":""}>{funnelGuideOpen?"닫기":usingFunnelAddress?"Funnel 주소":"안내 보기"}</em></button>{funnelGuideOpen&&<div className="tailscale-guide"><b>가족 아이폰에는 Tailscale이 필요 없어요</b><ol><li>Windows 서버에만 Tailscale이 설치됩니다.</li><li>가족은 이 <strong>*.ts.net</strong> 주소를 Safari에서 바로 엽니다.</li><li>각자 성근·지우·윤재 계정과 비밀번호로 로그인합니다.</li><li>Safari의 공유 → 홈 화면에 추가로 앱처럼 사용합니다.</li></ol><p>Funnel 주소 자체는 공개 인터넷에서 접근 가능하므로 주소를 외부에 공유하지 말고, 가족 비밀번호를 서로 다르게 유지하세요.</p></div>}</div>
@@ -1320,7 +1323,7 @@ export default function Home() {
       {quickAddModal&&<QuickAddModal onClose={()=>setQuickAddModal(false)} onStock={()=>openAssetModal("주식")} onCrypto={()=>openAssetModal("코인")} onDebt={()=>setDebtModal(true)} onCalendar={()=>openEventModal()} onLedger={()=>setTab("ledger")}/>}
       {assetModalType&&<AssetModal initialType={assetModalType} onClose={()=>setAssetModalType(null)} onSave={createAsset}/>}
       {debtModal&&<DebtModal onClose={()=>setDebtModal(false)} onSave={createDebt}/>}
-      {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
+      {reportItem&&<StockReportModal item={reportItem} report={stockReport} loading={reportLoading} error={reportError} readOnly={!isAdmin} onClose={()=>{setReportItem(null);setStockReport(null);setReportError("")}}/>}
     </main>
   );
 }

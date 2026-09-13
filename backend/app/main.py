@@ -26,6 +26,7 @@ from .prompts import build_stock_prompts
 from .scheduler import start_auto_refresh, stop_auto_refresh
 from .state import build_state, integrations, serialize_transaction
 from .telegram import send_telegram_message
+from .automation_api import router as automation_router
 
 
 @asynccontextmanager
@@ -40,6 +41,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="모아 자산 API", version="1.0.0", lifespan=lifespan)
+app.include_router(automation_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -101,7 +103,7 @@ class EventCreate(BaseModel):
 @app.get("/health")
 def health(db: Session = Depends(get_db)) -> dict[str, object]:
     db.execute(text("SELECT 1"))
-    return {"ok": True, "database": "sqlite", "version": app.version}
+    return {"ok": True, "app": "only-family-assets", "database": "sqlite", "version": app.version}
 
 
 @app.post("/api/auth/login")

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from .config import settings
 from .database import SessionLocal
 from .market import refresh_market
+from .automations import JOB_DEFAULTS, job_setting, run_scheduled
 
 
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -45,10 +46,11 @@ def next_scheduled_run(now: datetime, schedule: tuple[time, ...] = SCHEDULE) -> 
     return datetime.combine(local_now.date() + timedelta(days=1), schedule[0])
 
 
-def scheduler_status() -> dict[str, object]:
+def scheduler_status(db=None) -> dict[str, object]:
+    config = job_setting(db, "auto_refresh") if db is not None else {"enabled": settings.auto_refresh_enabled, "times": settings.auto_refresh_times}
     return {
-        "enabled": settings.auto_refresh_enabled,
-        "schedule": ", ".join(value.strftime("%H:%M") for value in SCHEDULE),
+        "enabled": config["enabled"],
+        "schedule": config["times"],
         **_runtime,
     }
 
@@ -65,25 +67,44 @@ def _refresh_once() -> dict[str, Any]:
 
 
 async def _scheduler_loop() -> None:
-    while True:
-        target = next_scheduled_run(datetime.now(SEOUL))
-        _runtime["next_run"] = target.isoformat(timespec="minutes")
-        await asyncio.sleep(max(1, (target - datetime.now(SEOUL)).total_seconds()))
-        _runtime["running"] = True
-        _runtime["last_error"] = ""
-        try:
-            _runtime["last_result"] = await asyncio.to_thread(_refresh_once)
-            _runtime["last_run"] = datetime.now(SEOUL).isoformat(timespec="seconds")
-        except Exception as exc:
-            _runtime["last_run"] = datetime.now(SEOUL).isoformat(timespec="seconds")
-            _runtime["last_error"] = type(exc).__name__
-        finally:
-            _runtime["running"] = False
+    active: dict[str, asyncio.Task] = {}
+    attempted: dict[str, str] = {}
+
+    def execute(key: str, slot: str) -> None:
+        with SessionLocal() as db:
+            run_scheduled(db, key, slot)
+
+    try:
+        while True:
+            now = datetime.now(SEOUL)
+            try:
+                with SessionLocal() as db:
+                    configs = [job_setting(db, key) for key in JOB_DEFAULTS if key != "price_alerts"]
+                market = configs[0]
+                _runtime["next_run"] = next_scheduled_run(now, parse_schedule_times(market["times"])).isoformat(timespec="minutes") if market["enabled"] else ""
+                for key, task in list(active.items()):
+                    if task.done():
+                        del active[key]
+                        task.result()
+                for config in configs:
+                    key = config["key"]
+                    slot = now.strftime("%Y-%m-%dT%H:%M")
+                    if config["enabled"] and now.strftime("%H:%M") in config["times"].split(",") and key not in active and attempted.get(key) != slot:
+                        attempted[key] = slot
+                        active[key] = asyncio.create_task(asyncio.to_thread(execute, key, slot))
+                _runtime["running"] = bool(active)
+                _runtime["last_error"] = ""
+            except Exception as exc:
+                _runtime["last_error"] = type(exc).__name__
+            await asyncio.sleep(10)
+    finally:
+        # Let an in-flight network operation finish instead of cancelling its
+        # bookkeeping while the message could already have been delivered.
+        if active:
+            await asyncio.gather(*active.values(), return_exceptions=True)
 
 
 def start_auto_refresh() -> asyncio.Task[None] | None:
-    if not settings.auto_refresh_enabled:
-        return None
     return asyncio.create_task(_scheduler_loop(), name="market-auto-refresh")
 
 

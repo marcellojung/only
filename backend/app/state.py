@@ -48,7 +48,7 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
         "connected": telegram_configured(),
         "message": "설정됨" if telegram_configured() else "설정 필요",
     }
-    auto_refresh = scheduler_status()
+    auto_refresh = scheduler_status(db)
     return {
         "database": {
             "configured": True,
@@ -71,7 +71,7 @@ def integrations(db: Session, probe: bool = False) -> dict[str, dict[str, object
         "auto_refresh": {
             "configured": auto_refresh["enabled"],
             "connected": auto_refresh["enabled"] and not auto_refresh["last_error"],
-            "message": f"최근 실행 실패: {auto_refresh['last_error']}" if auto_refresh["last_error"] else ("4시간 자동 갱신 대기 중" if auto_refresh["enabled"] else "자동 갱신 꺼짐"),
+            "message": f"최근 실행 실패: {auto_refresh['last_error']}" if auto_refresh["last_error"] else ("자동 갱신 켜짐" if auto_refresh["enabled"] else "자동 갱신 꺼짐"),
             "detail": f"{auto_refresh['schedule']} · 다음 {auto_refresh['next_run'] or '계산 중'}",
             "last_checked_at": auto_refresh["last_run"],
         },
