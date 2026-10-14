@@ -490,18 +490,42 @@ function StockReportModal({ item, report, loading, error, readOnly, onClose }: {
 
 function GowalterPromptPanel({ promptData, busy, onAnalyze }: { promptData: GowalterPrompt; busy: string; onAnalyze:(prompt?:string)=>Promise<void> }) {
   const [promptDraft,setPromptDraft] = useState(promptData.prompt);
+  const [copyStatus,setCopyStatus] = useState("");
+  async function copyDraft() {
+    let copied = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(promptDraft);
+        copied = true;
+      }
+    } catch { /* Try selection-based copying when clipboard access is denied. */ }
+    if (!copied) {
+      const editor = document.getElementById("gowalter-prompt") as HTMLTextAreaElement | null;
+      if (editor) {
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.focus({preventScroll:true});
+        editor.select();
+        try { copied = document.execCommand("copy"); } catch { copied = false; }
+        if (copied) editor.setSelectionRange(start,end);
+      }
+    }
+    setCopyStatus(copied ? "프롬프트를 복사했습니다." : "복사하지 못했습니다. 입력창 내용을 선택해 Ctrl+C로 복사해 주세요.");
+  }
   return <article className="panel gowalter-prompt-panel">
     <div className="panel-head"><div><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트</h2></div><span className={`prompt-status ${promptData.archive_ready?"ready":"fallback"}`}>{promptData.archive_ready?"아카이브 연결":"기본 관점"}</span></div>
     <p className="prompt-intro">블로그의 확신을 그대로 따르지 않고, 거시 흐름과 이벤트·추세 구분을 우리 포트폴리오의 비중과 손실 허용 범위로 다시 해석해요.</p>
     <div className="lens-flow" aria-label="Gowalter 분석 순서"><span>거시</span><i>→</i><span>이벤트·추세</span><i>→</i><span>구조적 성장</span><i>→</i><span>분할 대응</span></div>
     <label className="prompt-editor-label" htmlFor="gowalter-prompt">실제 AI에 전달되는 프롬프트</label>
-    <textarea id="gowalter-prompt" className="prompt-editor" value={promptDraft} maxLength={16000} onChange={(event)=>setPromptDraft(event.target.value)} />
+    <textarea id="gowalter-prompt" className="prompt-editor" value={promptDraft} maxLength={16000} onChange={(event)=>{setPromptDraft(event.target.value);setCopyStatus("");}} />
+    <button type="button" className="text-button" disabled={!promptDraft.trim()} onClick={()=>void copyDraft()}>프롬프트 복사</button>
+    {copyStatus&&<p role="status">{copyStatus}</p>}
     {promptData.related_posts.length?<div className="related-posts"><span>현재 종목과 연결된 글</span>{promptData.related_posts.slice(0,3).map((post)=><a key={`${post.published_at}-${post.title}`} href={post.url||undefined} target={post.url?"_blank":undefined} rel={post.url?"noreferrer":undefined}><b>{post.title}</b><small>{post.published_at||"날짜 미상"}</small></a>)}</div>:null}
     <div className="prompt-actions"><small>{promptData.source_label}</small><button className="text-button" disabled={busy==="ai"} onClick={()=>setPromptDraft(promptData.prompt)}>원문 복원</button><button className="primary-button small" disabled={!promptDraft.trim()||Boolean(busy)} onClick={()=>void onAnalyze(promptDraft)}>{busy==="ai"?"분석 중…":"이 프롬프트로 분석"}</button></div>
   </article>;
 }
 
-function Stocks({ hidden, readOnly, ownerFilter, onOwnerFilter, holdings, hiddenAssetKeys, summary, exchangeRate, analysis, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport, onToggleAssetHidden, onAdd }: { hidden: boolean; readOnly:boolean; ownerFilter:string; onOwnerFilter:(owner:string)=>void; holdings: HoldingData[]; hiddenAssetKeys: string[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; analysis: ServerState["latest_analysis"]; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null,owner:string)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void; onToggleAssetHidden:(key:string,label:string)=>void; onAdd:()=>void }) {
+function Stocks({ hidden, readOnly, ownerFilter, onOwnerFilter, holdings, hiddenAssetKeys, summary, exchangeRate, promptData, busy, onImport, onRefresh, onAnalyze, onSave, onOpenReport, onToggleAssetHidden, onAdd }: { hidden: boolean; readOnly:boolean; ownerFilter:string; onOwnerFilter:(owner:string)=>void; holdings: HoldingData[]; hiddenAssetKeys: string[]; summary?: AssetSummary; exchangeRate: ServerState["exchange_rate"] | null; promptData: GowalterPrompt | null; busy: string; onImport:(files:FileList|null,owner:string)=>void; onRefresh:()=>void; onAnalyze:(prompt?:string)=>Promise<void>; onSave:(id:number,data:Partial<HoldingData>)=>Promise<void>; onOpenReport:(item:HoldingData)=>void; onToggleAssetHidden:(key:string,label:string)=>void; onAdd:()=>void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [importOwner,setImportOwner] = useState("성근");
   const principal = summary?.investment_principal || holdings.reduce((sum,item)=>sum+item.principal,0);
@@ -556,7 +580,6 @@ function Stocks({ hidden, readOnly, ownerFilter, onOwnerFilter, holdings, hidden
         </div>
         {holdings.length>6&&<p className="allocation-note">가독성을 위해 평가액 상위 6개 종목을 표시하고, 나머지 {holdings.length-6}개 종목은 기타로 합쳤어요.</p>}
       </article>}
-      {!readOnly&&analysis&&<article className="panel ai-panel"><div className="panel-head"><div><span className="eyebrow">{analysis.provider} · {analysis.model}</span><h2>최근 AI 분석</h2></div></div><pre>{analysis.text}</pre><TelegramAction kind="portfolio_analysis" /></article>}
       {!readOnly&&(promptData?<GowalterPromptPanel promptData={promptData} busy={busy} onAnalyze={onAnalyze}/>:<article className="panel gowalter-prompt-panel prompt-loading"><span className="eyebrow">Gowalter blog lens</span><h2>관점 프롬프트를 준비하고 있어요</h2></article>)}
       <div className="section-title-row"><div><span className="eyebrow">보유 종목 {holdings.length}개</span><h2>내 포트폴리오</h2></div>{!readOnly&&<button className="primary-button small" onClick={onAdd}>＋ 자산 추가</button>}</div>
       <div className="holding-list">{holdings.length?holdings.map((item,index)=><HoldingCard key={item.id} item={item} index={index} totalValue={allocationTotal} hidden={hidden} assetHidden={hiddenAssetKeys.includes(assetKey(item))} readOnly={readOnly} onToggleHidden={()=>onToggleAssetHidden(assetKey(item),item.name)} onSave={onSave} onOpenReport={onOpenReport}/>):<article className="empty-card">{readOnly?"내 이름으로 등록된 투자자산이 없습니다.":"뱅크샐러드 파일을 올리거나 자산을 직접 추가해 주세요."}</article>}</div>
@@ -1307,7 +1330,7 @@ export default function Home() {
       <div className="content">
         {tab === "summary" && <Summary hidden={hidden} hiddenRealEstate={hiddenRealEstate} readOnly={!isAdmin} setTab={setTab} portfolio={portfolio} transactions={transactions} onImport={importFile} importStatus={importStatus} importing={busy==="import"} />}
         {tab === "family" && <Family hidden={hidden} portfolio={portfolio} members={serverState?.members||{}} />}
-        {tab === "stocks" && <Stocks hidden={hidden} readOnly={!isAdmin} ownerFilter={stockOwnerFilter} onOwnerFilter={setStockOwnerFilter} holdings={displayedStockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} analysis={serverState?.latest_analysis||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
+        {tab === "stocks" && <Stocks hidden={hidden} readOnly={!isAdmin} ownerFilter={stockOwnerFilter} onOwnerFilter={setStockOwnerFilter} holdings={displayedStockHoldings} hiddenAssetKeys={hiddenAssetKeys} exchangeRate={serverState?.exchange_rate||null} promptData={gowalterPrompt} busy={busy} onImport={importStocks} onRefresh={refreshMarket} onAnalyze={runAnalysis} onSave={saveHolding} onOpenReport={openStockReport} onToggleAssetHidden={toggleAssetHidden} onAdd={()=>openAssetModal("주식")} />}
         {tab === "ledger" && <Ledger hidden={hidden} readOnly={!isAdmin} transactions={transactions} allTransactionsLoaded={allTransactionsLoaded} loadingTransactions={loadingTransactions} onImport={importFile} onLoadAll={loadAllTransactions} />}
         {tab === "crypto" && <Crypto hidden={hidden} readOnly={!isAdmin} holdings={cryptoHoldings} hiddenAssetKeys={hiddenAssetKeys} busy={busy} onRefresh={refreshMarket} onAdd={()=>openAssetModal("코인")} onToggleAssetHidden={toggleAssetHidden} onSave={saveHolding} onOpenReport={openStockReport} />}
         {tab === "realestate" && <RealEstate hidden={hidden} readOnly={!isAdmin} assetHidden={hiddenRealEstate} onToggleHidden={()=>toggleAssetHidden("category:realestate","부동산")} onAddDebt={()=>setDebtModal(true)} portfolio={portfolio} debts={serverState?.debts||[]} />}

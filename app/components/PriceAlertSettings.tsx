@@ -22,7 +22,7 @@ export default function PriceAlertSettings({ holdingId, currency }: { holdingId:
     setBusy(true); setMessage("");
     try {
       const values = Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, Number(value) || 0]));
-      const response = await fetch(`/backend/automations/holdings/${holdingId}/price-rules`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, rearm }) });
+      const response = await fetch(`/backend/automations/holdings/${holdingId}/price-rules`, { method: "PUT", headers: { "x-moa-request": "1", "content-type": "application/json" }, body: JSON.stringify({ ...values, rearm }) });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "가격과 변동률을 확인해 주세요.");
       setRules(data.rules); setMessage(rearm ? "다음 조건 도달 시 다시 알립니다." : "가격 알림 조건을 저장했습니다.");
