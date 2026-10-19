@@ -268,6 +268,7 @@ def _parse_generic_holdings_sheet(sheet) -> list[dict[str, Any]]:  # type: ignor
             continue
         raw_currency = _text(value(row, currency_i)).upper()
         currency = "USD" if "USD" in raw_currency or (ticker and not ticker.isdigit() and not ticker.endswith((".KS", ".KQ"))) else "KRW"
+        average_price_krw = average if average and currency == "KRW" else None
         holdings.append({
             "asset_type": "주식/ETF",
             "broker": _text(value(row, broker_i)),
@@ -280,6 +281,8 @@ def _parse_generic_holdings_sheet(sheet) -> list[dict[str, Any]]:  # type: ignor
             "return_rate": (market_value - principal) / principal if principal else 0,
             "quantity": quantity or None,
             "quantity_source": "upload" if quantity else "",
+            "average_price_krw": average_price_krw,
+            "average_price_source": "upload" if average_price_krw else "",
             "current_price": current or None,
             "price_source": "upload",
         })
@@ -423,6 +426,8 @@ def import_upload(db: Session, content: bytes, filename: str, owner: str) -> dic
                     "ticker_source": record.ticker_source,
                     "quantity": record.quantity,
                     "quantity_source": record.quantity_source,
+                    "average_price_krw": record.average_price_krw,
+                    "average_price_source": record.average_price_source,
                     "target_price": record.target_price,
                     "target_alert_enabled": record.target_alert_enabled,
                     "target_alert_sent_at": record.target_alert_sent_at,

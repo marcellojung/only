@@ -210,6 +210,7 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
     if average_currency not in {"KRW", "USD"}:
         raise HTTPException(status_code=400, detail="평단 통화는 KRW 또는 USD만 지원합니다.")
     principal = payload.principal
+    average_price_krw = principal / payload.quantity if principal else None
     if payload.average_price:
         fx = 1.0
         if average_currency == "USD":
@@ -221,6 +222,7 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
                     raise HTTPException(status_code=502, detail="USD 평단 환산에 필요한 환율을 가져오지 못했습니다.") from exc
             fx = exchange.rate
         principal = payload.quantity * payload.average_price * fx
+        average_price_krw = payload.average_price * fx
     holding = Holding(
         owner=payload.owner.strip(),
         source_key=f"manual:{uuid4().hex}",
@@ -234,6 +236,8 @@ def create_holding(payload: HoldingCreate, db: Session = Depends(get_db)) -> dic
         market_value=principal,
         quantity=payload.quantity,
         quantity_source="user",
+        average_price_krw=average_price_krw,
+        average_price_source="user" if average_price_krw else "",
         price_source="manual",
         is_active=True,
     )
@@ -315,18 +319,24 @@ def update_holding(holding_id: int, payload: HoldingPatch, db: Session = Depends
         raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
     values = payload.model_dump(exclude_unset=True)
     average_price_krw = values.pop("average_price_krw", None)
+    average_price_was_updated = average_price_krw is not None and average_price_krw != holding.average_price_krw
+    quantity_was_updated = "quantity" in values
     previous_target = holding.target_price
     for key, value in values.items():
         if key == "ticker" and isinstance(value, str):
             value = normalize_user_symbol(holding.asset_type, value, holding.name)
             holding.ticker_source = "user"
-        if key == "quantity" and value is not None:
+        if key == "quantity" and value is not None and value != holding.quantity:
             holding.quantity_source = "user"
         setattr(holding, key, value)
     if average_price_krw is not None:
         if not holding.quantity:
             raise HTTPException(status_code=400, detail="평단을 저장하려면 보유 수량이 필요합니다.")
-        holding.principal = average_price_krw * holding.quantity
+        holding.average_price_krw = average_price_krw
+        if average_price_was_updated:
+            holding.average_price_source = "user"
+    if (quantity_was_updated or average_price_was_updated) and holding.quantity and holding.average_price_krw:
+        holding.principal = holding.average_price_krw * holding.quantity
     if "target_price" in values and holding.target_price != previous_target:
         holding.target_alert_sent_at = None
     create_portfolio_snapshot(db, source="holding_update")

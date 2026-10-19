@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 from backend.app.database import Base
 from backend.app.importer import _deactivate
 from backend.app.main import HoldingCreate, create_holding
-from backend.app.market import _is_krw_symbol, _latest_price, normalize_user_symbol
+from backend.app.market import _is_krw_symbol, _latest_price, normalize_user_symbol, refresh_market
 from backend.app.models import Holding
 
 
@@ -36,6 +36,39 @@ def test_invalid_market_price_is_skipped(monkeypatch) -> None:
 
     monkeypatch.setattr("backend.app.market.yf.Ticker", lambda _symbol: FakeTicker())
     assert _latest_price("196170.KQ") is None
+
+
+def test_market_refresh_does_not_invent_missing_quantity(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr("backend.app.market.refresh_exchange_rate", lambda _db: type("Rate", (), {"rate": 1400.0})())
+    monkeypatch.setattr("backend.app.market._latest_price", lambda _symbol: 80_000.0)
+    monkeypatch.setattr("backend.app.market._maybe_send_target_alert", lambda *_args: (0, 0))
+    monkeypatch.setattr("backend.app.price_alerts.check_price_rules", lambda *_args: (0, 0))
+    monkeypatch.setattr("backend.app.market.create_portfolio_snapshot", lambda *_args, **_kwargs: type("Snapshot", (), {"id": 1})())
+    with Session(engine) as db:
+        holding = Holding(
+            owner="성근",
+            source_key="bank:stock",
+            name="삼성전자",
+            ticker="005930.KS",
+            ticker_source="user",
+            market_value=1_100_000,
+            quantity=None,
+        )
+        db.add(holding)
+        db.commit()
+
+        refresh_market(db)
+
+        assert holding.quantity is None
+        assert holding.quantity_source == ""
+        assert holding.market_value == 1_100_000
+        assert holding.current_price == 80_000
 
 
 def test_bank_import_deactivation_preserves_manual_holdings() -> None:
@@ -99,3 +132,5 @@ def test_create_us_stock_converts_average_price_to_krw(monkeypatch) -> None:
         )
         holding = db.scalar(select(Holding))
         assert holding is not None and holding.principal == 280_000
+        assert holding.average_price_krw == 140_000
+        assert holding.average_price_source == "user"

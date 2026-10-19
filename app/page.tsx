@@ -66,7 +66,8 @@ type HoldingData = {
   target_price: number;
   target_alert_enabled: boolean;
   target_alert_sent_at: string;
-  average_price_krw?: number;
+  average_price_krw: number | null;
+  average_price_source: string;
 };
 
 type AssetSummary = {
@@ -261,6 +262,9 @@ const initialPortfolio: Portfolio = {
 };
 
 const money = (value: number) => new Intl.NumberFormat("ko-KR").format(value);
+const won = (value: number) => money(Math.round(value));
+const quotePrice = (value:number,currency:string) => new Intl.NumberFormat("ko-KR",{maximumFractionDigits:currency==="KRW"?0:4}).format(value);
+const holdingQuantity = (value:number,crypto:boolean) => new Intl.NumberFormat("ko-KR",{maximumFractionDigits:crypto?8:6}).format(value);
 const toTransaction = (item:ServerState["transactions"][number]):Transaction => ({id:item.id,date:item.date,merchant:item.merchant,category:item.category,amount:item.amount,kind:item.type==="수입"?"income":"expense",owner:item.owner,paymentMethod:item.payment_method});
 const compactMoney = (value: number) => {
   if (value >= 100000000) {
@@ -416,7 +420,7 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
   const [ticker, setTicker] = useState(item.ticker);
   const [target, setTarget] = useState(item.target_price ? String(item.target_price) : "");
   const [quantity, setQuantity] = useState(item.quantity ? String(item.quantity) : "");
-  const [averagePrice, setAveragePrice] = useState(item.quantity ? String(item.principal/item.quantity) : "");
+  const [averagePrice, setAveragePrice] = useState(item.average_price_krw ? String(item.average_price_krw) : "");
   const estimated = item.quantity_source === "estimated_from_import_value";
   const profit = item.market_value-item.principal;
   const returnPercent = item.return_rate*100;
@@ -433,22 +437,22 @@ function HoldingCard({ item, index, totalValue, hidden, assetHidden, readOnly, o
     </button>
     <div className="holding-infographic">
       <div className="holding-stat primary"><span>평가액</span><strong><Amount hidden={masked}>{compactMoney(item.market_value)}</Amount></strong></div>
-      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong><small><Amount hidden={masked}>{item.quantity?`원화 평단 ${money(item.principal/item.quantity)}원`:"평단 입력 필요"}</Amount></small></div>
+      <div className="holding-stat"><span>투자 원금</span><strong><Amount hidden={masked}>{compactMoney(item.principal)}</Amount></strong><small><Amount hidden={masked}>{item.average_price_krw?`원화 평단 ${won(item.average_price_krw)}원${item.average_price_source==="legacy_calculated"?" · 기존 원금 기준":""}`:"평단 입력 필요"}</Amount></small></div>
       <div className="holding-stat"><span>평가 손익</span><strong className={profit<0?"negative":"positive"}><Amount hidden={masked}>{profit>=0?"+":""}{compactMoney(profit)}</Amount></strong></div>
-      <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={masked}>{money(item.current_price)} {item.currency}</Amount>:"갱신 전"}</strong></div>
+      <div className="holding-stat"><span>현재가</span><strong>{item.current_price?<Amount hidden={masked}>{quotePrice(item.current_price,item.currency)} {item.currency}</Amount>:"갱신 전"}</strong></div>
       <div className="return-visual" aria-label={`${item.name} 수익률 ${returnPercent.toFixed(1)}퍼센트`}>
         <div className="return-caption"><span>손실</span><b className={returnPercent<0?"negative":"positive"}><Amount hidden={masked}>{returnPercent>=0?"+":""}{returnPercent.toFixed(1)}%</Amount></b><span>수익</span></div>
         <div className="return-track"><i className="zero-line"/><i className="return-marker" style={{left:`${meterPosition}%`}}/><span className="loss-zone"/><span className="gain-zone"/></div>
       </div>
-      <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${money(item.quantity)}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 확인 전"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button>{!readOnly&&<b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b>}</div>
+      <div className="holding-detail-line"><span><Amount hidden={masked}>{item.quantity?`${holdingQuantity(item.quantity,isCryptoHolding(item))}${isCryptoHolding(item)?"개":"주"} 보유`:"수량 입력 필요"}</Amount></span><span>{item.price_updated_at?`${item.price_updated_at.slice(5,16).replace("T"," ")} 갱신`:"뱅크샐러드 평가액"}</span><button type="button" onClick={()=>onOpenReport(item)}>상세 분석</button><button type="button" className="holding-visibility" onClick={onToggleHidden}>{assetHidden?"표시":"숨기기"}</button>{!readOnly&&<b>{editing?"설정 닫기":"티커·목표가 설정 ›"}</b>}</div>
     </div>
-    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();await onSave(item.id,{ticker,quantity:Number(quantity),average_price_krw:Number(averagePrice),target_price:Number(target)||0,target_alert_enabled:true});setEditing(false)}}>
+    {!readOnly&&editing && <form className="holding-editor" onSubmit={async(event)=>{event.preventDefault();const data:Partial<HoldingData>={ticker,target_price:Number(target)||0,target_alert_enabled:true};if(quantity.trim())data.quantity=Number(quantity);if(averagePrice.trim())data.average_price_krw=Number(averagePrice);await onSave(item.id,data);setEditing(false)}}>
       <label>티커<input value={ticker} onChange={(event)=>setTicker(event.target.value)} placeholder="005930.KS / AAPL"/></label>
-      <label>보유 수량<input type="number" min="0.00000001" step="any" value={quantity} onChange={(event)=>setQuantity(event.target.value)} placeholder="10" required/></label>
-      <label>원화 환산 평단<input type="number" min="0.00000001" step="any" value={averagePrice} onChange={(event)=>setAveragePrice(event.target.value)} placeholder="평균 매입가" required/></label>
+      <label>보유 수량<input type="number" min="0.00000001" step="any" value={quantity} onChange={(event)=>setQuantity(event.target.value)} placeholder="10"/></label>
+      <label>원화 환산 평단<input type="number" min="0.00000001" step="any" value={averagePrice} onChange={(event)=>setAveragePrice(event.target.value)} placeholder="평균 매입가"/></label>
       <label>목표가 ({item.currency})<input type="number" min="0" step="any" value={target} onChange={(event)=>setTarget(event.target.value)} placeholder="목표가"/></label>
       <button className="primary-button small">저장</button>
-      <small>{estimated ? "수량은 최초 평가액과 현재가로 추정됨" : item.quantity ? `${money(item.quantity)}주` : "현재가 갱신 시 수량을 자동 추정"} · 목표 도달 시 Telegram 알림</small>
+      <small>{estimated ? "추정 수량은 사용하지 않습니다. 실제 수량과 평단을 입력해 주세요" : item.quantity ? `${holdingQuantity(item.quantity,isCryptoHolding(item))}${isCryptoHolding(item)?"개":"주"}` : "실제 수량과 평단을 입력해 주세요"} · 목표 도달 시 Telegram 알림</small>
     </form>}
     {!readOnly&&editing&&<PriceAlertSettings holdingId={item.id} currency={item.currency} />}
   </article>;

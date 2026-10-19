@@ -41,3 +41,6 @@ def test_parses_generic_stock_csv():
     assert len(parsed["holdings"]) == 1
     assert parsed["holdings"][0]["ticker"] == "005930.KS"
     assert parsed["holdings"][0]["market_value"] == 800_000
+    assert parsed["holdings"][0]["quantity"] == 10
+    assert parsed["holdings"][0]["average_price_krw"] == 70_000
+    assert parsed["holdings"][0]["current_price"] == 80_000

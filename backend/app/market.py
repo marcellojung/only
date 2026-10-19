@@ -257,9 +257,6 @@ def refresh_market(db: Session) -> dict[str, Any]:
         if not fx:
             skipped += 1
             continue
-        if not holding.quantity:
-            holding.quantity = holding.market_value / (price * fx) if price > 0 else None
-            holding.quantity_source = "estimated_from_import_value"
         if holding.quantity:
             holding.market_value = holding.quantity * price * fx
             holding.return_rate = (

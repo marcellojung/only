@@ -83,6 +83,8 @@ class Holding(Base):
     return_rate: Mapped[float] = mapped_column(Float, default=0)
     quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity_source: Mapped[str] = mapped_column(String(40), default="")
+    average_price_krw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_price_source: Mapped[str] = mapped_column(String(40), default="")
     current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_source: Mapped[str] = mapped_column(String(30), default="bank_salad")
     price_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -156,6 +158,8 @@ class HoldingSnapshot(Base):
     ticker: Mapped[str] = mapped_column(String(40), default="")
     principal: Mapped[float] = mapped_column(Float, default=0)
     market_value: Mapped[float] = mapped_column(Float, default=0)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_price_krw: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

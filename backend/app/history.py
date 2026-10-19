@@ -76,6 +76,8 @@ def create_portfolio_snapshot(
             ticker=item.ticker,
             principal=item.principal,
             market_value=item.market_value,
+            quantity=item.quantity,
+            average_price_krw=item.average_price_krw,
             current_price=item.current_price,
             captured_at=captured_at,
         )
