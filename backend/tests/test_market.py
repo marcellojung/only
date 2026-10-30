@@ -6,7 +6,7 @@ from backend.app.database import Base
 from backend.app.importer import _deactivate
 from backend.app.main import HoldingCreate, create_holding
 from backend.app.market import _is_krw_symbol, _latest_price, normalize_user_symbol, refresh_market
-from backend.app.models import Holding
+from backend.app.models import Holding, WatchItem
 
 
 def test_crypto_symbols_default_to_krw() -> None:
@@ -69,6 +69,33 @@ def test_market_refresh_does_not_invent_missing_quantity(monkeypatch) -> None:
         assert holding.quantity_source == ""
         assert holding.market_value == 1_100_000
         assert holding.current_price == 80_000
+
+
+def test_market_refresh_updates_watchlist_and_sends_target_once(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sent = []
+    monkeypatch.setattr("backend.app.market.refresh_exchange_rate", lambda _db: type("Rate", (), {"rate": 1400.0})())
+    monkeypatch.setattr("backend.app.market._latest_price", lambda _symbol: 120.0)
+    monkeypatch.setattr("backend.app.market.send_telegram_message", lambda text: sent.append(text) or {"ok": True, "message": "sent"})
+    monkeypatch.setattr("backend.app.market.create_portfolio_snapshot", lambda *_args, **_kwargs: type("Snapshot", (), {"id": 1})())
+    with Session(engine) as db:
+        item = WatchItem(ticker="AAPL", target_price=100, currency="USD")
+        db.add(item)
+        db.commit()
+
+        first = refresh_market(db)
+        second = refresh_market(db)
+
+        assert first["watch_updated"] == 1
+        assert item.current_price == 120
+        assert item.alert_sent_at is not None
+        assert len(sent) == 1
+        assert second["alerts_sent"] == 0
 
 
 def test_bank_import_deactivation_preserves_manual_holdings() -> None:

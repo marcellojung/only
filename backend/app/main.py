@@ -26,6 +26,7 @@ from .prompts import build_stock_prompts
 from .scheduler import start_auto_refresh, stop_auto_refresh
 from .state import build_state, integrations, serialize_transaction
 from .telegram import send_telegram_message
+from .telegram_commands import start_telegram_commands, stop_telegram_commands
 from .automation_api import router as automation_router
 
 
@@ -34,9 +35,11 @@ async def lifespan(_app: FastAPI):
     settings.validate_security()
     init_db()
     scheduler_task = start_auto_refresh()
+    telegram_task = start_telegram_commands()
     try:
         yield
     finally:
+        await stop_telegram_commands(telegram_task)
         await stop_auto_refresh(scheduler_task)
 
 

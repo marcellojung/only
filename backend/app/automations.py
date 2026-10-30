@@ -113,10 +113,10 @@ def market_brief() -> str:
     return "\n".join(lines)
 
 
-def asset_brief(db: Session) -> str:
+def asset_brief(db: Session, title: str = "모아 저녁 자산 요약") -> str:
     summary = calculate_summary(db)
     latest = db.scalar(select(PortfolioSnapshot).order_by(PortfolioSnapshot.captured_at.desc()))
-    lines = [f"[모아 저녁 자산 요약] {datetime.now(SEOUL):%Y-%m-%d %H:%M}", "저장된 최근 평가액 기준 · 입출금과 업로드 변화가 포함될 수 있습니다.", ""]
+    lines = [f"[{title}] {datetime.now(SEOUL):%Y-%m-%d %H:%M}", "저장된 최근 평가액 기준 · 입출금과 업로드 변화가 포함될 수 있습니다.", ""]
     for label, key in (("총자산", "total_assets"), ("순자산", "net_assets"), ("투자 평가액", "investment_value"), ("부채", "total_debts")):
         lines.append(f"• {label}: {summary[key]:,.0f}원")
     if latest:

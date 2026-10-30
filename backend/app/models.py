@@ -95,6 +95,20 @@ class Holding(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class WatchItem(Base):
+    __tablename__ = "watch_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    target_price: Mapped[float] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(10), default="KRW")
+    current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    alert_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Debt(Base):
     __tablename__ = "debts"
     __table_args__ = (UniqueConstraint("owner", "source_key", name="uq_debt_owner_source"),)
@@ -232,6 +246,14 @@ class TelegramPreview(Base):
     job_key: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TelegramBotState(Base):
+    __tablename__ = "telegram_bot_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    last_update_id: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class HoldingAlertRule(Base):

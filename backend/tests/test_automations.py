@@ -1,4 +1,5 @@
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -11,8 +12,9 @@ from backend.app import automations
 from backend.app.auth import Viewer, current_user
 from backend.app.automation_api import router
 from backend.app.database import Base, get_db
-from backend.app.models import AlertEvent, AutomationRun, TelegramPreview, utcnow
+from backend.app.models import AlertEvent, AutomationRun, Holding, TelegramPreview, WatchItem, utcnow
 from backend.app.telegram import split_message
+from backend.app.telegram_commands import HELP_TEXT, command_response, normalize_command, process_updates
 
 
 @pytest.fixture
@@ -125,3 +127,65 @@ def test_long_unicode_messages_keep_all_content():
     assert "".join(parts) == text
     assert len(parts) > 1
     assert all(len(part.encode("utf-16-le")) // 2 <= 3500 for part in parts)
+
+
+def test_telegram_command_phrases_map_to_requested_responses(db, monkeypatch):
+    monkeypatch.setattr("backend.app.telegram_commands.asset_brief", lambda _db, title: f"[{title}]")
+    monkeypatch.setattr("backend.app.telegram_commands.market_brief", lambda: "[모아 아침 브리핑]")
+    assert command_response(db, "현재 조회") == "[모아 현재 자산 조회]"
+    assert command_response(db, "/current") == "[모아 현재 자산 조회]"
+    assert command_response(db, "아침 브리핑") == "[모아 아침 브리핑]"
+    assert command_response(db, "/morning@my_bot") == "[모아 아침 브리핑]"
+    assert command_response(db, "help") == HELP_TEXT
+    assert command_response(db, "/start") == HELP_TEXT
+    assert normalize_command("  현재   조회 ") == "현재조회"
+
+
+def test_refresh_command_reports_holding_and_watch_counts(db, monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.telegram_commands.refresh_market",
+        lambda _db: {"updated": 3, "watch_updated": 2, "skipped": 1, "alerts_sent": 1},
+    )
+    response = command_response(db, "/refresh")
+    assert "보유 종목 3개" in response
+    assert "관심종목 2개" in response
+
+
+def test_watch_command_registers_queries_and_deletes(db):
+    registered = command_response(db, "watch AAPL 250")
+    item = db.scalar(select(WatchItem))
+    assert item is not None and item.ticker == "AAPL" and item.target_price == 250
+    assert "등록했습니다" in registered
+    assert "AAPL" in command_response(db, "watch")
+    assert "250.00 USD" in command_response(db, "watch AAPL")
+    assert "삭제했습니다" in command_response(db, "watch 삭제 AAPL")
+    assert item.is_active is False
+
+
+def test_stock_command_sets_queries_and_disables_target(db):
+    holding = Holding(owner="성근", source_key="test:samsung", name="삼성전자", ticker="005930.KS", currency="KRW", current_price=80_000)
+    db.add(holding)
+    db.commit()
+    assert "등록했습니다" in command_response(db, "stock 삼성전자 100000")
+    assert holding.target_price == 100_000 and holding.target_alert_enabled is True
+    assert "목표 100,000 KRW" in command_response(db, "stock 005930.KS")
+    assert "해제했습니다" in command_response(db, "stock 삼성전자 해제")
+    assert holding.target_price == 0 and holding.target_alert_enabled is False
+
+
+def test_telegram_updates_only_answer_configured_chat_once(db, monkeypatch):
+    sent = []
+    answered = []
+    monkeypatch.setattr("backend.app.telegram_commands.settings", SimpleNamespace(telegram_chat_id="123"))
+    monkeypatch.setattr("backend.app.telegram_commands.send_telegram_message", lambda text, **kwargs: sent.append(text) or {"ok": True})
+    monkeypatch.setattr("backend.app.telegram_commands.answer_callback_query", lambda callback_id: answered.append(callback_id))
+    updates = [
+        {"update_id": 10, "message": {"chat": {"id": 999}, "text": "help"}},
+        {"update_id": 11, "message": {"chat": {"id": 123}, "text": "help"}},
+        {"update_id": 12, "callback_query": {"id": "callback-1", "data": "current", "message": {"chat": {"id": 123}}}},
+    ]
+    monkeypatch.setattr("backend.app.telegram_commands.asset_brief", lambda _db, title: f"[{title}]")
+    assert process_updates(db, updates) == 2
+    assert process_updates(db, updates) == 0
+    assert sent == [HELP_TEXT, "[모아 현재 자산 조회]"]
+    assert answered == ["callback-1"]

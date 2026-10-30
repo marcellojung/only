@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .history import create_portfolio_snapshot
-from .models import AlertEvent, ExchangeRateHistory, Holding, utcnow
+from .models import AlertEvent, ExchangeRateHistory, Holding, WatchItem, utcnow
 from .telegram import send_telegram_message
 
 
@@ -230,6 +230,7 @@ def refresh_market(db: Session) -> dict[str, Any]:
     resolved = 0
     alerts_sent = 0
     alerts_failed = 0
+    watch_updated = 0
     now = utcnow()
 
     holdings = list(db.scalars(select(Holding).where(Holding.is_active.is_(True))))
@@ -274,6 +275,35 @@ def refresh_market(db: Session) -> dict[str, Any]:
         alerts_failed += failed
         updated += 1
 
+    watch_items = list(db.scalars(select(WatchItem).where(WatchItem.is_active.is_(True))))
+    for item in watch_items:
+        price = _latest_price(item.ticker)
+        if price is None:
+            continue
+        item.currency = "KRW" if _is_krw_symbol(item.ticker) else "USD"
+        item.current_price = price
+        item.price_updated_at = now
+        watch_updated += 1
+        if item.target_price <= 0 or price < item.target_price or item.alert_sent_at is not None:
+            continue
+        message = f"[관심종목 목표가 도달] {item.ticker}\n현재가 {price:,.2f} {item.currency} / 목표가 {item.target_price:,.2f}"
+        result = send_telegram_message(message)
+        db.add(
+            AlertEvent(
+                alert_type="watch_target",
+                message=message,
+                trigger_price=price,
+                threshold_price=item.target_price,
+                success=bool(result["ok"]),
+                response_message=str(result["message"]),
+            )
+        )
+        if result["ok"]:
+            item.alert_sent_at = now
+            alerts_sent += 1
+        else:
+            alerts_failed += 1
+
     snapshot = create_portfolio_snapshot(db, source="market_refresh")
     db.commit()
     return {
@@ -282,6 +312,7 @@ def refresh_market(db: Session) -> dict[str, Any]:
         "tickers_resolved": resolved,
         "alerts_sent": alerts_sent,
         "alerts_failed": alerts_failed,
+        "watch_updated": watch_updated,
         "snapshot_id": snapshot.id,
         "exchange_rate": exchange.rate if exchange else 0,
         "updated_at": now.isoformat(timespec="seconds"),

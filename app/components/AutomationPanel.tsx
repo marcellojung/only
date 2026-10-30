@@ -100,7 +100,7 @@ export default function AutomationPanel() {
     catch (error) { setMessage(error instanceof Error ? error.message : "새로고침 실패"); }
     finally { setBusy(""); }
   }
-  const labels: Record<string, string> = { target_price: "목표가 알림", stop_loss: "손절 기준", buy_below: "하락 매수가", change_percent: "변동률", research_digest: "뉴스·공시", connection_test: "연결 테스트", morning_brief: "아침 브리핑", evening_brief: "저녁 요약", holding_report: "종목 분석", portfolio_analysis: "AI 분석", auto_refresh: "시세 갱신" };
+  const labels: Record<string, string> = { target_price: "목표가 알림", watch_target: "관심종목 목표가", stop_loss: "손절 기준", buy_below: "하락 매수가", change_percent: "변동률", research_digest: "뉴스·공시", connection_test: "연결 테스트", morning_brief: "아침 브리핑", evening_brief: "저녁 요약", holding_report: "종목 분석", portfolio_analysis: "AI 분석", auto_refresh: "시세 갱신" };
   const statuses: Record<string, string> = { succeeded: "완료", failed: "실패", running: "처리 중 · 중단됐다면 결과 확인 필요", uncertain: "발송 결과 확인 필요", cancelled: "취소" };
   return <section className="automation-panel" aria-label="자동 작업과 텔레그램">
     <div className="automation-heading"><div><span className="eyebrow">자동화</span><h2>필요한 소식만 받아보기</h2></div><button type="button" className="text-button" disabled={!!busy} onClick={() => void refresh()}>새로고침</button></div>
